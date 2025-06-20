@@ -10,7 +10,7 @@ from docker import DockerClient
 from docker.models.containers import Container
 from loguru import logger
 from result import Err, Ok, Result
-
+import time
 from src.helper import timeout
 
 
@@ -58,10 +58,13 @@ class ContainerManager:
 					f"Container not found: {container_identifier}, attempting to create it"
 				)
 				try:
+					safe_container_identifier = container_identifier.replace("/", "-").replace(":", "-")
+					unique_container_identifier = f"{safe_container_identifier}-{int(time.time())}"
+
 					_container = client.containers.create(
 						image="superioragents/agent-executor:latest",
-						name=container_identifier,
-						hostname=container_identifier,
+						name=unique_container_identifier,
+						hostname=unique_container_identifier,
 						environment={"PYTHONUNBUFFERED": "1"},
 						network_mode="host",
 						detach=True,
@@ -69,7 +72,7 @@ class ContainerManager:
 					)
 					_container.start()
 					logger.info(
-						f"Successfully created and started container: {container_identifier}"
+						f"Successfully created and started container: {safe_container_identifier}"
 					)
 				except docker.errors.APIError as e:
 					logger.error(f"Failed to create container: {container_identifier}")

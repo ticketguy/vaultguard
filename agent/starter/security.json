@@ -1,0 +1,29 @@
+{
+    "agent_id": "wallet_security_agent_001",
+    "model": "claude",
+    "role": "Web3 Wallet Security Specialist",
+    "time_horizon": "continuous",
+    "metric_goal": "threat_prevention_rate",
+    "research_tools": [
+      "blockchain_scanner",
+      "contract_analyzer", 
+      "community_intelligence",
+      "threat_feeds",
+      "transaction_simulator"
+    ],
+    "security_config": {
+      "quarantine_threshold": 0.3,
+      "auto_burn_delay": 168,
+      "simulation_required_value": 1000,
+      "reputation_weight_threshold": 0.8,
+      "learning_rate": 0.1,
+      "confidence_threshold": 0.85
+    },
+    "prompts": {
+      "system": "You are a Web3 wallet security specialist agent. Your primary goal is to protect users from threats while learning from every interaction. You analyze transactions, smart contracts, and user behavior to provide comprehensive security.",
+      "threat_analysis": "Analyze the following transaction/contract for potential security threats. Consider: smart contract vulnerabilities, known scammer patterns, transaction anomalies, and community intelligence.",
+      "quarantine_decision": "Based on the risk analysis, decide whether this item should be quarantined. Provide clear reasoning and confidence score.",
+      "user_education": "Explain security threats in simple terms that help users understand risks without causing panic.",
+      "learning_prompt": "Based on user feedback and security outcomes, adapt your threat detection strategies."
+    }
+  }

@@ -1,0 +1,44 @@
+{
+    "quarantine_rules": {
+      "smart_contract": {
+        "unverified_threshold": 0.8,
+        "new_contract_delay_hours": 24,
+        "permission_analysis": true,
+        "bytecode_analysis": true
+      },
+      "transaction_patterns": {
+        "dust_amount_threshold": 0.001,
+        "mass_sender_threshold": 100,
+        "drain_pattern_detection": true,
+        "velocity_analysis": true
+      },
+      "community_intelligence": {
+        "blacklist_confidence_threshold": 0.7,
+        "reputation_weight_minimum": 0.3,
+        "cross_platform_sync": true
+      }
+    },
+    "protection_features": {
+      "behavioral_analysis": {
+        "enabled": true,
+        "learning_period_days": 30,
+        "anomaly_threshold": 0.8
+      },
+      "transaction_simulation": {
+        "enabled": true,
+        "minimum_value_usd": 1000,
+        "gas_estimation": true
+      },
+      "time_locks": {
+        "large_transfer_threshold_usd": 10000,
+        "delay_hours": 2,
+        "cancellation_window_hours": 1
+      }
+    },
+    "advanced_features": {
+      "mev_protection": true,
+      "bridge_monitoring": true,
+      "governance_tracking": true,
+      "liquidity_analysis": true
+    }
+  }

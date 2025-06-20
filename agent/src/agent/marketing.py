@@ -256,9 +256,6 @@ class MarketingPromptGenerator:
 				Your goal is to maximize {metric_name} within {time}.
 				You are currently at {metric_state}.
 			""").strip(),
-			#
-			#
-			#
 			"strategy_prompt": dedent("""
 				Here is your strategy :
 				<Strategy>
@@ -290,15 +287,12 @@ class MarketingPromptGenerator:
 				
 				load_dotenv()
 
-                def main():
-                    ....
-                
-                main()
-                ```
-		""").strip(),
-			#
-			#
-			#
+				def main():
+					....
+				
+				main()
+				```
+			""").strip(),
 			"research_code_prompt": dedent("""
 				Given that you are currently at {metric_state}, please write code to research the most up-to-date social media management techniques to maximise {metric_name} within {time} for a {role}.
 				You have access to exa search (use curl requests to "https://api.exa.ai/search" with headers "content-type: application/json" and "x-api-key: {{EXA_API_KEY}}") for fresh ideas/hashtags—summarize and adapt, don't copy; hashtags must be trending, tweets as numbered single sentences (max 120 chars, no questions unless asked).
@@ -314,10 +308,11 @@ class MarketingPromptGenerator:
 				
 				main()
 				```
-             """).strip(),
-			#
-			#
-			#
+			""").strip(),
+			"research_code_prompt_first": dedent("""
+				Write research code using the following APIs:
+				{apis_str}
+			""").strip(),
 			"marketing_code_prompt": dedent("""
 				Please help debug the code in the following text:
 				<Strategy>
@@ -337,24 +332,17 @@ class MarketingPromptGenerator:
 				main()
 				```
 			""").strip(),
-			#
-			#
-			#
 			"regen_code_prompt": dedent("""
 				Given these errors
 				<Errors>
 				{errors}
 				</Errors>
-				(Note: A 403 error ussualy means your tweet is too long. Please reduce the length below 280 characters and make sure to handle any 403 errors gracefully.)
 				And the code it's from
 				<Code>
-				{latest_response}
+				{previous_code}
 				</Code>
-				And the instruction it's from
-				<Instruction>
-				{latest_instruction}
-				</Instruction>
-				You are to generate code that fixes the error, in this format.
+				Please generate the code that fixes the problem.
+				Format the code as follows:
 				```python
 				from dotenv import load_dotenv
 				import ...
@@ -363,12 +351,9 @@ class MarketingPromptGenerator:
 
 				def main():
 					....
-				
+
 				main()
 				```
-				You are to generate new code that does not change or stray from the original code.
-				You are to print for everything, and raise every error or unexpected behavior of the program.
-				Please generate the code that fixes the problem.
 			""").strip(),
 		}
 

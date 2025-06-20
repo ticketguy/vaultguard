@@ -238,3 +238,33 @@ websockets==13.1
     # via web3
 yarl==1.18.3
     # via aiohttp
+
+
+# Security Analysis
+cryptography>=41.0.0
+web3>=6.0.0
+eth-account>=0.9.0
+solana>=0.30.0
+requests>=2.31.0
+
+# Machine Learning for Security
+scikit-learn>=1.3.0
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Blockchain Analysis
+py-evm>=0.7.0
+eth-hash[pycryptodome]>=0.5.0
+
+# Community Intelligence
+networkx>=3.0
+redis>=4.5.0
+
+# Additional Utils
+pydantic>=2.0.0
+python-dateutil>=2.8.0
+asyncio-throttle>=1.0.0
+EOF
+
+# Install new dependencies
+pip install -e .

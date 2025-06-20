@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  security-agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.security
+    environment:
+      - SECURITY_DB_URL=postgresql://security:security@security-db:5432/security_db
+      - REDIS_URL=redis://security-redis:6379
+    depends_on:
+      - security-db
+      - security-redis
+    volumes:
+      - ../src:/app/src
+      - ../config:/app/config
+    ports:
+      - "8001:8001"
+
+  security-db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=security_db
+      - POSTGRES_USER=security
+      - POSTGRES_PASSWORD=security
+    volumes:
+      - security_db_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+
+  security-redis:
+    image: redis:7-alpine
+    volumes:
+      - security_redis_data:/data
+    ports:
+      - "6380:6379"
+
+volumes:
+  security_db_data:
+  security_redis_data:

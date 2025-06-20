@@ -1,0 +1,32 @@
+{
+    "update_interval_hours": 6,
+    "max_patterns": 10000,
+    "confidence_threshold": 0.8,
+    "sources": {
+      "enable_twitter_monitoring": true,
+      "enable_exploit_db": true,
+      "enable_community_reports": true,
+      "twitter_accounts": [
+        "@peckshield",
+        "@slowmist_team",
+        "@blocksecteam",
+        "@certikalert"
+      ],
+      "exploit_databases": [
+        "rekt.news",
+        "defiyield.app",
+        "immunefi.com"
+      ]
+    },
+    "intelligence_weights": {
+      "address_intelligence": 0.4,
+      "token_intelligence": 0.3,
+      "contract_intelligence": 0.2,
+      "pattern_matches": 0.1
+    },
+    "storage": {
+      "max_scammer_addresses": 50000,
+      "max_exploit_signatures": 10000,
+      "data_retention_days": 365
+    }
+  }
