@@ -1,8 +1,12 @@
+"""
+Manager module for handling security agent configuration and prompts.
+Updated to work with security-only framework.
+"""
+
 from pprint import pformat
 from loguru import logger
-from src.agent.marketing import MarketingPromptGenerator
-from src.agent.trading import TradingPromptGenerator
-from src.constants import FE_DATA_MARKETING_DEFAULTS, FE_DATA_TRADING_DEFAULTS
+from src.agent.security import SecurityPromptGenerator
+from src.constants import FE_DATA_SECURITY_DEFAULTS
 
 
 class ManagerClient:
@@ -24,7 +28,7 @@ class ManagerClient:
 		Fetch frontend data for the specified agent type.
 
 		Args:
-		        type (str): The type of agent ("trading" or "marketing")
+		        type (str): The type of agent (only "security" supported)
 
 		Returns:
 		        dict: A dictionary containing the frontend data with defaults filled in
@@ -33,18 +37,16 @@ class ManagerClient:
 		        If an error occurs during fetching, the method falls back to default values
 		        and logs the error.
 		"""
-		fe_data = (
-			FE_DATA_TRADING_DEFAULTS.copy()
-			if type == "trading"
-			else FE_DATA_MARKETING_DEFAULTS.copy()
-		)
+		# Only support security type now
+		if type != "security":
+			logger.warning(f"Unsupported agent type: {type}. Using security defaults.")
+			type = "security"
+		
+		fe_data = FE_DATA_SECURITY_DEFAULTS.copy()
 
 		try:
-			# Get default prompts
-			if type == "trading":
-				default_prompts = TradingPromptGenerator.get_default_prompts()
-			else:
-				default_prompts = MarketingPromptGenerator.get_default_prompts()
+			# Get default prompts for security
+			default_prompts = SecurityPromptGenerator.get_default_prompts()
 
 			logger.info(f"Available default prompts: {list(default_prompts.keys())}")
 
@@ -59,11 +61,7 @@ class ManagerClient:
 		except Exception as e:
 			logger.error(f"Error fetching session logs: {e}, going with defaults")
 			# In case of error, return fe_data with default prompts
-			if type == "trading":
-				default_prompts = TradingPromptGenerator.get_default_prompts()
-			else:
-				default_prompts = MarketingPromptGenerator.get_default_prompts()
-
+			default_prompts = SecurityPromptGenerator.get_default_prompts()
 			fe_data["prompts"].update(default_prompts)
 
 		logger.info(f"Final prompts: \n{pformat(fe_data['prompts'], 1)}")
@@ -77,12 +75,16 @@ def fetch_fe_data(type: str):
 
 
 def fetch_default_prompt(fe_data, type: str):
-	# Get default prompts
+	# Get default prompts for security only
 	input_data = fe_data.copy()
-	if type == "trading":
-		default_prompts = TradingPromptGenerator.get_default_prompts()
-	else:
-		default_prompts = MarketingPromptGenerator.get_default_prompts()
+	
+	# Only support security type
+	if type != "security":
+		logger.warning(f"Unsupported agent type: {type}. Using security defaults.")
+		type = "security"
+	
+	default_prompts = SecurityPromptGenerator.get_default_prompts()
+	
 	try:
 		logger.info(f"Available default prompts: {list(default_prompts.keys())}")
 
