@@ -81,9 +81,9 @@ class SmartContractExplainer:
         }
         
         # Analyze what the contract can actually do
-        permissions_analysis = await self._analyze_token_permissions(function_signatures)
-        dangerous_functions_analysis = await self._analyze_dangerous_functions(function_signatures, bytecode)
-        ownership_analysis = await self._analyze_ownership_structure(function_signatures, bytecode)
+        permissions_analysis = await self._analyze_token_permissions(functions)
+        dangerous_functions_analysis = await self._analyze_dangerous_functions(functions, bytecode)
+        ownership_analysis = await self._analyze_ownership_structure(functions, bytecode)
         
         # Build what it can do list
         analysis['what_it_can_do'] = (

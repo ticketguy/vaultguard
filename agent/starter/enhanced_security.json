@@ -9,8 +9,16 @@
       "deep_pattern_analysis": true,
       "cross_wallet_intelligence": true,
       "enhanced_quarantine": true,
-      "background_monitoring": true
+      "background_monitoring": true,
+      "mev_detection": true,
+      "dust_detection": true,
+      "enhanced_contract_analysis": true,
+      "drain_link_detection": true,
+      "nft_scam_detection": true,
+      "network_analysis": true
+      
     },
+    
     "quarantine_config": {
       "quarantine_threshold": 0.7,
       "auto_burn_delay": 168,
@@ -23,11 +31,27 @@
         "warning_only": 0.3
       }
     },
+    "mev_config": {
+      "enable_sandwich_detection": true,
+      "enable_front_running_detection": true,
+      "enable_arbitrage_detection": true,
+      "enable_liquidation_detection": true,
+      "mev_warning_threshold": 0.6,
+      "mev_quarantine_threshold": 0.8,
+      "priority_fee_warning_multiplier": 2.0
+  },
     "analysis_weights": {
       "smart_contract_analysis": 0.3,
       "pattern_analysis": 0.25,
       "community_intelligence": 0.25,
-      "behavioral_analysis": 0.2
+      "behavioral_analysis": 0.2,
+      "mev_analysis": 0.2,
+      "dust_analysis": 0.1,
+      "enhanced_contract_analysis": 0.1,
+      "drain_analysis": 0.1,
+      "nft_analysis": 0.1,
+      "network_analysis": 0.05
+      
     },
     "learning_config": {
       "enable_user_feedback_learning": true,

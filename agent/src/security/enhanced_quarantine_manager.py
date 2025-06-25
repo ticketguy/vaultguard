@@ -58,7 +58,7 @@ class EnhancedQuarantineManager:
         }
     
     async def _calculate_enhanced_confidence(self, analysis_result: Dict, 
-                                           transaction_data: Dict) -> Dict:
+                                        transaction_data: Dict) -> Dict:
         """Calculate enhanced confidence with multiple factors"""
         
         confidence_factors = {
@@ -66,14 +66,22 @@ class EnhancedQuarantineManager:
             'community_intelligence': 0.0,
             'historical_patterns': 0.0,
             'transaction_characteristics': 0.0,
-            'cross_validation': 0.0
+            'cross_validation': 0.0,
+            'perfect_detection_bonus': 0.0
         }
         
         # AI Analysis Confidence
         ai_confidence = analysis_result.get('confidence_score', 0.0)
         threat_categories = analysis_result.get('threat_categories', [])
         
-        if 'drain_contract' in threat_categories:
+        # ENHANCED: Perfect AI detection should guarantee quarantine
+        if ai_confidence >= 1.0 and any(cat in ['known_malicious_sender', 'scam_detected', 'community_blacklisted'] for cat in threat_categories):
+            confidence_factors['ai_analysis'] = 1.0
+            # Boost overall confidence for perfect threat detection
+            confidence_factors['perfect_detection_bonus'] = 0.3
+        elif any(cat in ['known_malicious_sender', 'scam_detected', 'community_blacklisted'] for cat in threat_categories):
+            confidence_factors['ai_analysis'] = min(ai_confidence + 0.5, 1.0)
+        elif 'drain_contract' in threat_categories:
             confidence_factors['ai_analysis'] = min(ai_confidence + 0.2, 1.0)
         elif 'dust_attack' in threat_categories:
             confidence_factors['ai_analysis'] = min(ai_confidence + 0.1, 1.0)
@@ -82,7 +90,7 @@ class EnhancedQuarantineManager:
         
         # Community Intelligence Confidence
         community_data = analysis_result.get('community_intelligence', {})
-        if community_data.get('blacklisted'):
+        if community_data and community_data.get('blacklisted'):
             confidence_factors['community_intelligence'] = community_data.get('confidence', 0.0)
         
         # Historical Pattern Confidence
@@ -111,7 +119,8 @@ class EnhancedQuarantineManager:
             'community_intelligence': 0.3,
             'historical_patterns': 0.15,
             'transaction_characteristics': 0.1,
-            'cross_validation': 0.05
+            'cross_validation': 0.05,
+            'perfect_detection_bonus': 0.9
         }
         
         overall_confidence = sum(
@@ -125,7 +134,7 @@ class EnhancedQuarantineManager:
             'detection_methods_count': detection_methods,
             'reasoning': self._generate_confidence_reasoning(confidence_factors, detection_methods)
         }
-    
+
     async def _determine_action_by_confidence(self, enhanced_confidence: Dict) -> Dict:
         """Determine action based on enhanced confidence score"""
         confidence = enhanced_confidence['overall_confidence']
@@ -254,3 +263,5 @@ class EnhancedQuarantineManager:
             'action': 'auto_burned',
             'message': 'Item auto-burned with user permission'
         }
+    
+    

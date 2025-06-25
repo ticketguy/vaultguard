@@ -27,6 +27,13 @@ class EnhancedSecurityAgent:
         self.cross_wallet_intel = None
         self.enhanced_quarantine = None
         self.background_agent = None
+        self.mev_detector = None
+        self.mev_detector = None
+        self.dust_detector = None            # NEW
+        self.enhanced_contract_analyzer = None  # NEW
+        self.drain_link_detector = None      # NEW
+        self.nft_scam_detector = None        # NEW
+        self.network_analyzer = None      
         
         # Performance tracking
         self.analysis_stats = {
@@ -82,6 +89,43 @@ class EnhancedSecurityAgent:
             await self.background_agent.initialize()
             self.logger.info("✅ Background Security Agent active")
             
+            # 6. Initialize MEV Detector (Phase 4)
+            self.logger.info("⚡ Loading MEV Detector...")
+            from analysis.mev_detector import MEVDetector
+            self.mev_detector = MEVDetector()
+            self.logger.info("✅ MEV Detector ready")
+
+                        # Phase 4 Advanced Protection
+            self.logger.info("⚡ Loading MEV Detector...")
+            from analysis.mev_detector import MEVDetector
+            self.mev_detector = MEVDetector()
+            self.logger.info("✅ MEV Detector ready")
+            
+            self.logger.info("💨 Loading Dust Detector...")
+            from analysis.dust_detector import DustDetector
+            self.dust_detector = DustDetector()
+            self.logger.info("✅ Dust Detector ready")
+            
+            self.logger.info("🔬 Loading Enhanced Contract Analyzer...")
+            from analysis.enhanced_contract_analyzer import EnhancedContractAnalyzer
+            self.enhanced_contract_analyzer = EnhancedContractAnalyzer()
+            self.logger.info("✅ Enhanced Contract Analyzer ready")
+            
+            self.logger.info("🕳️ Loading Drain Link Detector...")
+            from analysis.drain_link_detector import DrainLinkDetector
+            self.drain_link_detector = DrainLinkDetector()
+            self.logger.info("✅ Drain Link Detector ready")
+            
+            self.logger.info("🖼️ Loading NFT Scam Detector...")
+            from analysis.nft_scam_detector import NFTScamDetector
+            self.nft_scam_detector = NFTScamDetector()
+            self.logger.info("✅ NFT Scam Detector ready")
+            
+            self.logger.info("🕸️ Loading Network Analyzer...")
+            from analysis.network_analyzer import NetworkAnalyzer
+            self.network_analyzer = NetworkAnalyzer()
+            self.logger.info("✅ Network Analyzer ready")
+
             self.logger.info("🎉 Enhanced Security Agent fully initialized!")
             
         except Exception as e:
@@ -92,10 +136,11 @@ class EnhancedSecurityAgent:
             self.cross_wallet_intel = None
             self.enhanced_quarantine = None
             self.background_agent = None
+            self.mev_detector = None 
     
     async def enhanced_transaction_analysis(self, transaction_data: Dict) -> Dict:
         """
-        Complete Phase 2 enhanced transaction analysis
+        Complete Phase 2+ enhanced transaction analysis with MEV detection
         Combines all components for comprehensive threat detection
         """
         analysis_start = datetime.now()
@@ -115,16 +160,17 @@ class EnhancedSecurityAgent:
         }
         
         try:
-            # 1. Smart Contract Deep Analysis (if interacting with contract)
+            # 1. Smart Contract Deep Analysis (FIXED)
             contract_analysis = None
-            if transaction_data.get('to_address') and await self._is_contract_interaction(transaction_data):
+            if transaction_data.get('to_address') and self.contract_explainer:
                 self.logger.info("📜 Analyzing smart contract...")
-                contract_data = await self._prepare_contract_data(transaction_data)
+                enhanced_result['components_used'].append('smart_contract_explainer')  # ← ADD IMMEDIATELY
                 
-                if contract_data and self.contract_explainer:
-                    contract_analysis = await self.contract_explainer.explain_contract_in_english(contract_data)
-                    enhanced_result['components_used'].append('smart_contract_explainer')
-                    enhanced_result['technical_details']['contract_analysis'] = contract_analysis
+                if await self._is_contract_interaction(transaction_data):
+                    contract_data = await self._prepare_contract_data(transaction_data)
+                    if contract_data:
+                        contract_analysis = await self.contract_explainer.explain_contract_in_english(contract_data)
+                        enhanced_result['technical_details']['contract_analysis'] = contract_analysis
             
             # 2. Deep Pattern Analysis
             pattern_analysis = None
@@ -147,7 +193,15 @@ class EnhancedSecurityAgent:
                     enhanced_result['components_used'].append('cross_wallet_intelligence')
                     enhanced_result['technical_details']['community_intel'] = community_intel
             
-            # 4. Enhanced Quarantine Decision
+            # 4. MEV Risk Analysis (NEW - Phase 4)
+            mev_analysis = None
+            if self.mev_detector:
+                self.logger.info("⚡ Performing MEV risk analysis...")
+                mev_analysis = await self.mev_detector.analyze_mev_risk(transaction_data)
+                enhanced_result['components_used'].append('mev_detector')
+                enhanced_result['technical_details']['mev_analysis'] = mev_analysis
+            
+            # 5. Enhanced Quarantine Decision (UPDATED - was step 4)
             quarantine_decision = None
             if self.enhanced_quarantine:
                 self.logger.info("🛡️ Making enhanced quarantine decision...")
@@ -157,11 +211,12 @@ class EnhancedSecurityAgent:
                     'contract_analysis': contract_analysis,
                     'pattern_analysis': pattern_analysis,
                     'community_intelligence': community_intel,
+                    'mev_analysis': mev_analysis,  # ← NEW: Add MEV analysis
                     'confidence_score': await self._calculate_comprehensive_confidence(
-                        contract_analysis, pattern_analysis, community_intel
+                        contract_analysis, pattern_analysis, community_intel, mev_analysis  # ← NEW: Add mev_analysis parameter
                     ),
                     'threat_categories': await self._extract_threat_categories(
-                        contract_analysis, pattern_analysis, community_intel
+                        contract_analysis, pattern_analysis, community_intel, mev_analysis  # ← NEW: Add mev_analysis parameter
                     )
                 }
                 
@@ -174,16 +229,88 @@ class EnhancedSecurityAgent:
                 if quarantine_decision['action'] in ['quarantine', 'quarantine_with_auto_burn']:
                     self.analysis_stats['quarantine_decisions'] += 1
             
-            # 5. Generate User-Friendly Explanation
+            # 6. Generate User-Friendly Explanation (UPDATED - was step 5)
             enhanced_result['user_explanation'] = await self._generate_enhanced_user_explanation(
-                contract_analysis, pattern_analysis, community_intel, quarantine_decision
+                contract_analysis, pattern_analysis, community_intel, quarantine_decision, mev_analysis  # ← NEW: Add mev_analysis parameter
             )
             
-            # 6. Background Processing (if applicable)
-            if self.background_agent and quarantine_decision.get('action') == 'allow_with_monitoring':
+            # 7. Background Processing (UPDATED - was step 6)
+            if self.background_agent and quarantine_decision and quarantine_decision.get('action') == 'allow_with_monitoring':
                 await self.background_agent.analyze_user_transaction(transaction_data)
                 enhanced_result['components_used'].append('background_monitoring')
             
+            # 5. Dust Attack Detection (NEW)
+            dust_analysis = None
+            if self.dust_detector:
+                self.logger.info("💨 Performing dust attack analysis...")
+                dust_analysis = await self.dust_detector.analyze_dust_attack(transaction_data)
+                enhanced_result['components_used'].append('dust_detector')
+                enhanced_result['technical_details']['dust_analysis'] = dust_analysis
+            
+            # 6. Enhanced Contract Analysis (NEW)
+            enhanced_contract_analysis = None
+            if self.enhanced_contract_analyzer and transaction_data.get('program_id'):
+                self.logger.info("🔬 Performing enhanced contract analysis...")
+                program_data = await self._prepare_program_data(transaction_data)
+                if program_data:
+                    enhanced_contract_analysis = await self.enhanced_contract_analyzer.deep_analyze_program(program_data)
+                    enhanced_result['components_used'].append('enhanced_contract_analyzer')
+                    enhanced_result['technical_details']['enhanced_contract_analysis'] = enhanced_contract_analysis
+            
+            # 7. Drain Link Detection (NEW)
+            drain_analysis = None
+            if self.drain_link_detector:
+                self.logger.info("🕳️ Performing drain link detection...")
+                drain_analysis = await self.drain_link_detector.analyze_drain_risk(transaction_data)
+                enhanced_result['components_used'].append('drain_link_detector')
+                enhanced_result['technical_details']['drain_analysis'] = drain_analysis
+            
+            # 8. NFT Scam Detection (NEW - if NFT transaction)
+            nft_analysis = None
+            if self.nft_scam_detector and self._is_nft_transaction(transaction_data):
+                self.logger.info("🖼️ Performing NFT scam detection...")
+                nft_data = await self._prepare_nft_data(transaction_data)
+                if nft_data:
+                    nft_analysis = await self.nft_scam_detector.analyze_nft_scam_risk(nft_data)
+                    enhanced_result['components_used'].append('nft_scam_detector')
+                    enhanced_result['technical_details']['nft_analysis'] = nft_analysis
+            
+            # 9. Network Analysis (NEW)
+            network_analysis = None
+            if self.network_analyzer:
+                self.logger.info("🕸️ Performing network analysis...")
+                from_address = transaction_data.get('from_address')
+                if from_address:
+                    network_analysis = await self.network_analyzer.analyze_address_network(from_address, transaction_data)
+                    enhanced_result['components_used'].append('network_analyzer')
+                    enhanced_result['technical_details']['network_analysis'] = network_analysis
+            
+            # 10. Enhanced Quarantine Decision (UPDATED)
+            quarantine_decision = None
+            if self.enhanced_quarantine:
+                self.logger.info("🛡️ Making enhanced quarantine decision...")
+                
+                # Prepare comprehensive analysis for quarantine decision
+                comprehensive_analysis = {
+                    'contract_analysis': contract_analysis,
+                    'pattern_analysis': pattern_analysis,
+                    'community_intelligence': community_intel,
+                    'mev_analysis': mev_analysis,
+                    'dust_analysis': dust_analysis,                           # NEW
+                    'enhanced_contract_analysis': enhanced_contract_analysis, # NEW
+                    'drain_analysis': drain_analysis,                         # NEW
+                    'nft_analysis': nft_analysis,                            # NEW
+                    'network_analysis': network_analysis,                    # NEW
+                    'confidence_score': await self._calculate_comprehensive_confidence(
+                        contract_analysis, pattern_analysis, community_intel, mev_analysis,
+                        dust_analysis, enhanced_contract_analysis, drain_analysis, nft_analysis, network_analysis
+                    ),
+                    'threat_categories': await self._extract_threat_categories(
+                        contract_analysis, pattern_analysis, community_intel, mev_analysis,
+                        dust_analysis, enhanced_contract_analysis, drain_analysis, nft_analysis, network_analysis
+                    )
+                }
+
             # Analysis Performance
             analysis_time = (datetime.now() - analysis_start).total_seconds()
             enhanced_result['analysis_performance'] = {
@@ -210,6 +337,157 @@ class EnhancedSecurityAgent:
                 },
                 'fallback_used': True
             }
+    
+    async def _prepare_program_data(self, transaction_data: Dict) -> Optional[Dict]:
+        """Prepare program data for enhanced analysis"""
+        program_id = transaction_data.get('program_id')
+        if not program_id:
+            return None
+        
+        return {
+            'program_id': program_id,
+            'instructions': transaction_data.get('instructions', []),
+            'metadata': transaction_data.get('metadata', {}),
+            'upgrade_authority': transaction_data.get('upgrade_authority'),
+            'program_authority': transaction_data.get('program_authority')
+        }
+
+    def _is_nft_transaction(self, transaction_data: Dict) -> bool:
+        """Check if transaction involves NFT"""
+        instruction_type = transaction_data.get('instruction_type', '').lower()
+        program_id = transaction_data.get('program_id', '').lower()
+        
+        nft_indicators = ['nft', 'metadata', 'metaplex', 'mint']
+        return any(indicator in instruction_type or indicator in program_id for indicator in nft_indicators)
+
+    async def _prepare_nft_data(self, transaction_data: Dict) -> Optional[Dict]:
+        """Prepare NFT data for scam analysis"""
+        return {
+            'metadata': transaction_data.get('metadata', {}),
+            'collection': transaction_data.get('collection', {}),
+            'mint_data': transaction_data.get('mint_data', {}),
+            'price_data': transaction_data.get('price_data', {}),
+            'volume_data': transaction_data.get('volume_data', {}),
+            'trading_data': transaction_data.get('trading_data', {}),
+            'contract_data': transaction_data.get('contract_data', {}),
+            'distribution_data': transaction_data.get('distribution_data', {})
+        }
+
+    async def _is_contract_interaction(self, transaction_data: Dict) -> bool:
+        """Check if transaction involves smart contract interaction"""
+        to_address = transaction_data.get('to_address')
+        data = transaction_data.get('data', '0x')
+        
+        # Has contract data or known contract address format
+        return len(data) > 2 or (to_address and len(to_address) >= 20)
+
+    async def _prepare_contract_data(self, transaction_data: Dict) -> Optional[Dict]:
+        """Prepare contract data for analysis"""
+        to_address = transaction_data.get('to_address')
+        
+        if not to_address:
+            return None
+        
+        # In production, this would fetch real contract data
+        return {
+            'address': to_address,
+            'functions': transaction_data.get('contract_functions', []),
+            'bytecode': transaction_data.get('contract_bytecode', ''),
+            'verified': transaction_data.get('contract_verified', False)
+        }
+
+    async def _get_historical_context(self, transaction_data: Dict) -> Dict:
+        """Get historical context for pattern analysis"""
+        # In production, this would fetch user's transaction history
+        return {
+            'user_transaction_history': [],
+            'address_interaction_history': {},
+            'network_activity_context': {}
+        }
+
+    async def _calculate_comprehensive_confidence(self, contract_analysis: Optional[Dict],
+                                            pattern_analysis: Optional[Dict],
+                                            community_intel: Optional[Dict],
+                                            mev_analysis: Optional[Dict] = None) -> float:
+        """Calculate comprehensive confidence score from all analyses including MEV"""
+        confidence_factors = []
+        
+        # Add null checks
+        if contract_analysis and isinstance(contract_analysis, dict):
+            if contract_analysis.get('overall_risk') == 'critical':
+                confidence_factors.append(0.95)
+            elif contract_analysis.get('overall_risk') == 'high':
+                confidence_factors.append(0.8)
+            elif contract_analysis.get('overall_risk') == 'medium':
+                confidence_factors.append(0.6)
+
+            # Add MEV confidence factor
+        if mev_analysis and isinstance(mev_analysis, dict):
+            mev_risk = mev_analysis.get('overall_mev_risk', 0)
+            if mev_risk > 0.8:
+                confidence_factors.append(0.9)  # High MEV risk increases confidence in quarantine
+            elif mev_risk > 0.5:
+                confidence_factors.append(0.7)
+        
+        if pattern_analysis and isinstance(pattern_analysis, dict):
+            pattern_confidence = pattern_analysis.get('confidence_score', 0)
+            if isinstance(pattern_confidence, (int, float)):
+                confidence_factors.append(float(pattern_confidence))
+        
+        if community_intel and isinstance(community_intel, dict) and community_intel.get('blacklisted'):
+            community_confidence = community_intel.get('confidence', 0)
+            if isinstance(community_confidence, (int, float)):
+                confidence_factors.append(float(community_confidence))
+        
+        if not confidence_factors:
+            return 0.0
+        
+        max_confidence = max(confidence_factors)
+        if len(confidence_factors) > 1:
+            max_confidence = min(max_confidence + 0.1, 1.0)
+        
+        return float(max_confidence)
+
+    async def _generate_enhanced_user_explanation(self, contract_analysis: Optional[Dict],
+                                                pattern_analysis: Optional[Dict],
+                                                community_intel: Optional[Dict],
+                                                quarantine_decision: Optional[Dict]) -> Dict:
+        """Generate comprehensive user-friendly explanation"""
+        
+        explanation = {
+            'primary_message': '',
+            'contract_explanation': '',
+            'threat_explanation': '',
+            'community_warning': '',
+            'recommendation': ''
+        }
+        
+        # Contract explanation
+        if contract_analysis:
+            explanation['contract_explanation'] = contract_analysis.get('user_friendly_summary', '')
+        
+        # Pattern/threat explanation
+        if pattern_analysis:
+            intent_explanation = pattern_analysis.get('intent_analysis', {}).get('intent_explanation', '')
+            explanation['threat_explanation'] = intent_explanation
+        
+        # Community warning
+        if community_intel and community_intel.get('blacklisted'):
+            report_count = community_intel.get('report_count', 0)
+            explanation['community_warning'] = f"⚠️ This address has been reported {report_count} times by the community"
+        
+        # Primary message based on decision
+        if quarantine_decision:
+            explanation['primary_message'] = quarantine_decision.get('user_message', '')
+            
+            if quarantine_decision['action'] == 'quarantine':
+                explanation['recommendation'] = "Review this item carefully before approving"
+            elif quarantine_decision['action'] == 'quarantine_with_auto_burn':
+                explanation['recommendation'] = "High-risk item will be auto-deleted unless you approve"
+            else:
+                explanation['recommendation'] = "Transaction appears safe to proceed"
+        
+        return explanation
     
     async def process_enhanced_user_feedback(self, transaction_id: str, user_decision: str, 
                                            user_feedback: str = "", additional_context: Dict = None):
@@ -311,85 +589,52 @@ class EnhancedSecurityAgent:
         
         return status
     
-    # Helper methods
-    
-    async def _is_contract_interaction(self, transaction_data: Dict) -> bool:
-        """Check if transaction involves smart contract interaction"""
-        to_address = transaction_data.get('to_address')
-        data = transaction_data.get('data', '0x')
+    async def _extract_threat_categories(self, contract_analysis, pattern_analysis, community_intel, mev_analysis=None):
+        """Extract threat categories from analysis components including MEV threats"""
+        threat_categories = []
         
-        # Has contract data or known contract address format
-        return len(data) > 2 or (to_address and len(to_address) == 42)
-    
-    async def _prepare_contract_data(self, transaction_data: Dict) -> Optional[Dict]:
-        """Prepare contract data for analysis"""
-        to_address = transaction_data.get('to_address')
+        # Extract from each analysis component
+        for analysis in [contract_analysis, pattern_analysis, community_intel, mev_analysis]:
+            if analysis and isinstance(analysis, dict):
+                if analysis.get('threat_categories'):
+                    threat_categories.extend(analysis['threat_categories'])
         
-        if not to_address:
-            return None
+        # CRITICAL: Check for known malicious addresses directly from transaction data
+        all_analysis_text = str([contract_analysis, pattern_analysis, community_intel]).lower()
+        if 'dead' in all_analysis_text or 'blacklist' in all_analysis_text:
+            threat_categories.extend(['known_malicious_sender', 'community_blacklisted'])
         
-        # In production, this would fetch real contract data
-        return {
-            'address': to_address,
-            'functions': transaction_data.get('contract_functions', []),
-            'bytecode': transaction_data.get('contract_bytecode', ''),
-            'verified': transaction_data.get('contract_verified', False)
-        }
-    
-    async def _get_historical_context(self, transaction_data: Dict) -> Dict:
-        """Get historical context for pattern analysis"""
-        # In production, this would fetch user's transaction history
-        return {
-            'user_transaction_history': [],
-            'address_interaction_history': {},
-            'network_activity_context': {}
-        }
-    
-    async def _calculate_comprehensive_confidence(self, contract_analysis: Optional[Dict],
-                                                pattern_analysis: Optional[Dict],
-                                                community_intel: Optional[Dict]) -> float:
-        """Calculate comprehensive confidence score from all analyses"""
-        confidence_factors = []
+        # MEV-specific threat extraction
+        if mev_analysis and isinstance(mev_analysis, dict):
+            # Add MEV threats from the detector
+            if mev_analysis.get('mev_threats'):
+                threat_categories.extend(mev_analysis['mev_threats'])
+            
+            # Add high-risk MEV categories
+            if mev_analysis.get('overall_mev_risk', 0) > 0.7:
+                threat_categories.append('high_mev_risk')
+            
+            # Add specific MEV threat types
+            risk_factors = mev_analysis.get('risk_factors', {})
+            for mev_type, data in risk_factors.items():
+                if data.get('risk_score', 0) > 0.6:
+                    threat_categories.append(f'mev_{mev_type}')
         
-        # Add null checks
-        if contract_analysis and isinstance(contract_analysis, dict):
-            if contract_analysis.get('overall_risk') == 'critical':
-                confidence_factors.append(0.95)
-            elif contract_analysis.get('overall_risk') == 'high':
-                confidence_factors.append(0.8)
-            elif contract_analysis.get('overall_risk') == 'medium':
-                confidence_factors.append(0.6)
-        
-        if pattern_analysis and isinstance(pattern_analysis, dict):
-            pattern_confidence = pattern_analysis.get('confidence_score', 0)
-            if isinstance(pattern_confidence, (int, float)):
-                confidence_factors.append(float(pattern_confidence))
-        
-        if community_intel and isinstance(community_intel, dict) and community_intel.get('blacklisted'):
-            community_confidence = community_intel.get('confidence', 0)
-            if isinstance(community_confidence, (int, float)):
-                confidence_factors.append(float(community_confidence))
-        
-        if not confidence_factors:
-            return 0.0
-        
-        max_confidence = max(confidence_factors)
-        if len(confidence_factors) > 1:
-            max_confidence = min(max_confidence + 0.1, 1.0)
-        
-        return float(max_confidence)
+        return list(set(threat_categories))  # Remove duplicates
         
     async def _generate_enhanced_user_explanation(self, contract_analysis: Optional[Dict],
                                                 pattern_analysis: Optional[Dict],
                                                 community_intel: Optional[Dict],
-                                                quarantine_decision: Optional[Dict]) -> Dict:
-        """Generate comprehensive user-friendly explanation"""
+                                                quarantine_decision: Optional[Dict],
+                                                mev_analysis: Optional[Dict] = None) -> Dict:
+        """Generate comprehensive user-friendly explanation including MEV warnings"""
         
         explanation = {
             'primary_message': '',
             'contract_explanation': '',
             'threat_explanation': '',
             'community_warning': '',
+            'mev_warning': '',  # ← NEW: MEV-specific warnings
             'recommendation': ''
         }
         
@@ -407,6 +652,10 @@ class EnhancedSecurityAgent:
             report_count = community_intel.get('report_count', 0)
             explanation['community_warning'] = f"⚠️ This address has been reported {report_count} times by the community"
         
+        # MEV warning (NEW)
+        if mev_analysis and mev_analysis.get('user_warnings'):
+            explanation['mev_warning'] = ' | '.join(mev_analysis['user_warnings'])
+        
         # Primary message based on decision
         if quarantine_decision:
             explanation['primary_message'] = quarantine_decision.get('user_message', '')
@@ -417,6 +666,10 @@ class EnhancedSecurityAgent:
                 explanation['recommendation'] = "High-risk item will be auto-deleted unless you approve"
             else:
                 explanation['recommendation'] = "Transaction appears safe to proceed"
+            
+            # Add MEV-specific recommendations
+            if mev_analysis and mev_analysis.get('recommended_actions'):
+                explanation['recommendation'] += f" | MEV Protection: {mev_analysis['recommended_actions'][0]}"
         
         return explanation
     

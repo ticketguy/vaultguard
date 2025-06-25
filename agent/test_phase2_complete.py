@@ -102,6 +102,7 @@ async def comprehensive_phase2_test():
     
     try:
         quarantine_result = await agent.enhanced_transaction_analysis(quarantine_test)
+        print(f"DEBUG: Quarantine decision = {quarantine_result.get('final_decision', {})}")
         components_used = quarantine_result.get('components_used', [])
         quarantine_used = 'enhanced_quarantine' in components_used
         

@@ -28,7 +28,7 @@ class CrossWalletIntelligence:
         # Reputation system
         self.reporter_reputation = {}  # wallet_provider -> reputation score
         self.report_validation = {}   # report_id -> validation data
-        
+        self.blacklisted_addresses = set()  
         # Intelligence sharing settings
         self.sharing_settings = {
             'auto_share_high_confidence': True,
@@ -95,7 +95,9 @@ class CrossWalletIntelligence:
             'confidence': 0.0,
             'report_count': 0
         }
-    
+
+
+
     async def validate_community_report(self, report_id: str, 
                                       validation_data: Dict) -> Dict:
         """Validate a community report (cross-verification)"""
