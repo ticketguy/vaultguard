@@ -1,763 +1,515 @@
 """
-SecurityAgent - Replaces TradingAgent with security monitoring
-Follows exact same class structure and patterns as TradingAgent
+SecurityAgent with integrated quarantine management
+Follows TradingAgent pattern but handles security analysis and quarantine decisions
 """
 
 import re
 from textwrap import dedent
 from typing import Dict, List, Set, Tuple
-from datetime import datetime
-from src.db import DBInterface
+from datetime import datetime, timedelta
+from enum import Enum
+import json
 
 from result import Err, Ok, Result
-
 from src.container import ContainerManager
 from src.genner.Base import Genner
 from src.client.rag import RAGClient
 from src.sensor.security import SecuritySensor
 from src.types import ChatHistory, Message
+from src.db import DBInterface
+
+
+class QuarantineStatus(Enum):
+    """Status types for quarantined security items"""
+    QUARANTINED = "quarantined"
+    APPROVED = "approved"
+    BURNED = "burned"
+    PENDING_REVIEW = "pending_review"
+
+
+class QuarantineItem:
+    """Represents a security item placed in quarantine"""
+    
+    def __init__(self, item_data: Dict, risk_score: float, reasoning: str):
+        self.id = item_data.get('hash', f"item_{datetime.now().timestamp()}")
+        self.item_data = item_data
+        self.risk_score = risk_score
+        self.reasoning = reasoning
+        self.status = QuarantineStatus.QUARANTINED
+        self.quarantined_at = datetime.now()
+        self.reviewed_at = None
+        self.user_decision = None
+        self.auto_burn_at = None
+        
+        # Schedule auto-burn for high-confidence threats
+        if risk_score > 0.9:
+            self.auto_burn_at = self.quarantined_at + timedelta(hours=168)
 
 
 class SecurityPromptGenerator:
-	"""
-	Generator for creating prompts used in security agent workflows.
-	Follows exact same structure as TradingPromptGenerator but for security operations.
-	
-	This class is responsible for generating various prompts used by the security agent,
-	including system prompts, analysis code prompts, threat detection prompts, and quarantine decision prompts.
-	"""
+    """Generates prompts for security analysis using chain of thought reasoning"""
+    
+    def __init__(self, prompts: Dict[str, str]):
+        if not prompts:
+            prompts = self.get_default_prompts()
+        self._validate_prompts(prompts)
+        self.prompts = prompts
 
-	def __init__(self, prompts: Dict[str, str]):
-		"""
-		Initialize with custom prompts for each function.
-		Follows exact same pattern as TradingPromptGenerator.__init__.
+    def _validate_prompts(self, prompts: Dict[str, str]):
+        """Ensure all required prompts are present"""
+        required_prompts = [
+            'system', 'analysis_code_prompt', 'analysis_code_on_first_prompt',
+            'strategy_prompt', 'quarantine_code_prompt', 'regen_code_prompt'
+        ]
+        for prompt in required_prompts:
+            if prompt not in prompts:
+                raise ValueError(f"Missing required prompt: {prompt}")
 
-		Args:
-		    prompts (Dict[str, str]): Dictionary containing custom prompts for each function
-		"""
-		if prompts:
-			prompts = self.get_default_prompts()
-		self._validate_prompts(prompts)
-		self.prompts = self.get_default_prompts()
+    def generate_system_prompt(self, role: str, time: str, metric_name: str, 
+                              metric_state: str, network: str) -> str:
+        """Generate system prompt with security context"""
+        return self.prompts['system'].format(
+            role=role,
+            time=time,
+            metric_name=metric_name,
+            metric_state=metric_state,
+            network=network
+        )
 
-	def get_default_prompts(self) -> Dict[str, str]:
-		"""
-		Get default security analysis prompts.
-		Replaces trading prompts with security-focused prompts.
-		"""
-		return {
-			"system_prompt": dedent("""
-				You are a {role} security agent protecting Web3 wallets from threats.
-				Today's date: {today_date}
-				Your goal: Analyze transactions and detect threats to maximize {metric_name} security over {time}.
-				
-				Current Security Status: {metric_state}
-				Blockchain Network: {network}
-				
-				You have access to advanced threat detection capabilities:
-				- Real-time transaction monitoring
-				- Dust attack detection  
-				- MEV protection
-				- Smart contract analysis
-				- Scam token identification
-				- NFT fraud prevention
-				
-				Your responses should include:
-				1. **Chain of Thought**: Show your security analysis reasoning step by step
-				2. **Threat Assessment**: Identify specific risks and confidence levels
-				3. **Protective Actions**: Recommend quarantine, block, or allow decisions
-				4. **User Education**: Explain threats in simple terms
-				
-				Always prioritize user safety while minimizing false positives.
-			""").strip(),
-			
-			"analysis_code_prompt_first": dedent("""
-				As a security agent, generate Python code to analyze blockchain transactions for threats.
-				
-				Available Security APIs:
-				{apis_str}
-				Network: {network}
-				
-				Requirements:
-				1. Connect to Solana blockchain and monitor transactions
-				2. Implement real-time threat detection algorithms
-				3. Search for suspicious patterns in transaction data
-				4. Generate security intelligence reports
-				5. Use print() statements to show your analysis reasoning (Chain of Thought)
-				
-				Focus on detecting:
-				- Dust attacks (micro-transactions for tracking)
-				- Suspicious token transfers
-				- MEV exploitation attempts
-				- Scam NFT airdrops
-				- Contract interaction risks
-				
-				Print your thought process as you analyze each transaction.
-				Format the code as follows:
-				```python
-				import ...
+    def generate_analysis_code_prompt(self, notifications_str: str, apis: str, 
+                                    prev_analysis: str, rag_summary: str,
+                                    before_metric_state: str, after_metric_state: str) -> str:
+        """Generate prompt for security analysis code with chain of thought"""
+        return self.prompts['analysis_code_prompt'].format(
+            notifications_str=notifications_str,
+            apis_str=apis,
+            prev_analysis=prev_analysis,
+            rag_summary=rag_summary,
+            before_metric_state=before_metric_state,
+            after_metric_state=after_metric_state
+        )
 
-				def main():
-				    # Chain of thought: Show reasoning
-				    print("Starting security analysis...")
-				    # Your analysis code here
-				    ....
+    def generate_quarantine_code_prompt(self, strategy_output: str, apis: str,
+                                      metric_state: str, security_tools: List[str],
+                                      meta_swap_api_url: str, network: str) -> str:
+        """Generate prompt for quarantine implementation code"""
+        security_tools_str = '\n'.join([f"- {tool}: {'quarantine suspicious items' if tool == 'quarantine' else f'{tool} threats'}" 
+                                       for tool in security_tools])
+        
+        return self.prompts['quarantine_code_prompt'].format(
+            strategy_output=strategy_output,
+            apis_str=apis,
+            metric_state=metric_state,
+            security_tools_str=security_tools_str,
+            meta_swap_api_url=meta_swap_api_url,
+            network=network
+        )
 
-				main()
-				```
-				Please generate the analysis code.
-			""").strip(),
-			
-			"analysis_code_prompt": dedent("""
-				Based on these security notifications:
-				<Notifications>
-				{notifications_str}
-				</Notifications>
-				
-				Previous analysis summary:
-				<Previous_Analysis>
-				{prev_analysis}
-				</Previous_Analysis>
-				
-				RAG Security Intelligence:
-				<RAG_Intelligence>
-				{rag_summary}
-				</RAG_Intelligence>
-				
-				Security status before: {before_metric_state}
-				Security status after: {after_metric_state}
-				
-				Generate Python code to analyze these new threats and update security measures.
-				
-				Available APIs: {apis_str}
-				Network: {network}
-				
-				Requirements:
-				1. Analyze the new security notifications
-				2. Cross-reference with previous threat patterns
-				3. Use RAG intelligence to identify known attack vectors
-				4. Update threat detection algorithms based on new patterns
-				5. Show your reasoning with print() statements (Chain of Thought)
-				
-				Print your analysis process step by step.
-				Format as:
-				```python
-				import ...
-
-				def main():
-				    print("Analyzing new security threats...")
-				    # Your analysis code here
-				    ....
-
-				main()
-				```
-			""").strip(),
-			
-			"strategy_prompt": dedent("""
-				Based on this security analysis:
-				<Analysis_Results>
-				{research_results}
-				</Analysis_Results>
-				
-				Available protection tools: {apis_str}
-				Current security metric: {before_metric_state}
-				Network: {network}
-				Time horizon: {time}
-				
-				Create a comprehensive security strategy that:
-				
-				1. **Threat Assessment** (Chain of Thought):
-				   - Analyze the identified threats step by step
-				   - Explain why each threat is dangerous
-				   - Rate the risk level for each threat
-				   
-				2. **Protection Strategy**:
-				   - Decide which transactions to quarantine/block/allow
-				   - Explain the reasoning behind each decision
-				   - Consider user experience vs security trade-offs
-				   
-				3. **Implementation Plan**:
-				   - Specify exact protective measures to implement
-				   - Include monitoring and alerting strategies
-				   - Plan for user education and notification
-				
-				Show your reasoning process clearly so users understand why you're making these security decisions.
-			""").strip(),
-			
-			"quarantine_code_prompt": dedent("""
-				Implement this security strategy:
-				<Security_Strategy>
-				{strategy_output}
-				</Security_Strategy>
-				
-				Available APIs:
-				{apis_str}
-				
-				Current security status: {metric_state}
-				Network: {network}
-				
-				Generate Python code that:
-				1. Implements the security decisions (quarantine/block/allow)
-				2. Updates threat detection rules
-				3. Configures monitoring and alerts
-				4. Documents all security actions taken
-				5. Shows reasoning with print() statements (Chain of Thought)
-				
-				Use the quarantine API to safely isolate threats:
-				{quarantine_tools}
-				
-				Print your decision-making process as you implement security measures.
-				Don't try/catch errors - let the program crash if something unexpected happens.
-				
-				Format the code as follows:
-				```python
-				import ...
-
-				def main():
-				    print("Implementing security strategy...")
-				    # Show your reasoning
-				    ....
-
-				main()
-				```
-				Please generate the code.
-			""").strip(),
-			
-			"regen_code_prompt": dedent("""
-				Given these errors:
-				<Errors>
-				{errors}
-				</Errors>
-				And the code it's from:
-				<Code>
-				{latest_response}
-				</Code>
-				
-				Generate new security code that fixes the error without changing the original logic.
-				Print everything and raise any errors or unexpected behavior.
-				
-				Show your debugging reasoning with print() statements.
-				
-				```python
-				from dotenv import load_dotenv
-				import ...
-
-				load_dotenv()
-
-				def main():
-				    print("Debugging security implementation...")
-				    # Show your fixing process
-				    ....
-				
-				main()
-				```
-				Please generate the code that fixes the problem.
-			""").strip(),
-		}
-
-	def _security_tools_to_api_prompt(
-		self,
-		tools: List[str],
-		meta_swap_api_url: str,
-		agent_id: str,
-		session_id: str,
-	):
-		"""
-		Convert security tools to API command prompts.
-		Replaces _instruments_to_curl_prompt from TradingPromptGenerator.
-		
-		Args:
-		    tools (List[str]): List of security tool types
-		    meta_swap_api_url (str): URL of the meta-swap API service
-		    agent_id (str): ID of the agent
-		    session_id (str): ID of the session
-		    
-		Returns:
-		    str: String containing API command examples for security tools
-		"""
-		try:
-			mapping = {
-				"quarantine": dedent(f"""
-					# Quarantine suspicious transaction
-					curl -X POST "http://{meta_swap_api_url}/api/v1/security/quarantine" \\
-					-H "Content-Type: application/json" \\
-					-H "x-superior-agent-id: {agent_id}" \\
-					-H "x-superior-session-id: {session_id}" \\
-					-d '{{
-						"transaction_hash": "<tx_signature>",
-						"wallet_address": "<affected_wallet>",
-						"threat_type": "<dust_attack|suspicious_token|mev_risk|scam_nft>",
-						"risk_score": <0.0_to_1.0>,
-						"reason": "<human_readable_explanation>"
-					}}'
-				"""),
-				
-				"block": dedent(f"""
-					# Block malicious transaction
-					curl -X POST "http://{meta_swap_api_url}/api/v1/security/block" \\
-					-H "Content-Type: application/json" \\
-					-H "x-superior-agent-id: {agent_id}" \\
-					-H "x-superior-session-id: {session_id}" \\
-					-d '{{
-						"address": "<malicious_address>",
-						"block_type": "<permanent|temporary>",
-						"duration_hours": <hours_if_temporary>,
-						"threat_category": "<scammer|drain_contract|fake_token>",
-						"evidence": "<threat_evidence_description>"
-					}}'
-				"""),
-				
-				"monitor": dedent(f"""
-					# Add address to monitoring
-					curl -X POST "http://{meta_swap_api_url}/api/v1/security/monitor" \\
-					-H "Content-Type: application/json" \\
-					-H "x-superior-agent-id: {agent_id}" \\
-					-H "x-superior-session-id: {session_id}" \\
-					-d '{{
-						"wallet_addresses": ["<address1>", "<address2>"],
-						"monitoring_level": "<basic|enhanced|real_time>",
-						"alert_thresholds": {{
-							"dust_amount": <sol_amount>,
-							"risk_score": <0.0_to_1.0>,
-							"frequency_limit": <transactions_per_hour>
-						}}
-					}}'
-				"""),
-				
-				"analyze": dedent(f"""
-					# Analyze transaction for threats
-					curl -X POST "http://{meta_swap_api_url}/api/v1/security/analyze" \\
-					-H "Content-Type: application/json" \\
-					-H "x-superior-agent-id: {agent_id}" \\
-					-H "x-superior-session-id: {session_id}" \\
-					-d '{{
-						"transaction_data": {{
-							"signature": "<transaction_signature>",
-							"from_address": "<sender_address>",
-							"to_address": "<recipient_address>",
-							"amount": "<amount_in_sol>",
-							"token_mint": "<token_mint_address_if_applicable>",
-							"program_id": "<solana_program_id>"
-						}},
-						"analysis_depth": "<quick|thorough|deep>",
-						"include_mev_check": true,
-						"include_dust_check": true
-					}}'
-				"""),
-			}
-			
-			tools_str = [mapping[tool] for tool in tools]
-			return "\n".join(tools_str)
-			
-		except KeyError as e:
-			raise KeyError(
-				f"Expected security tools to be in ['quarantine', 'block', 'monitor', 'analyze'], {e}"
-			)
-
-	@staticmethod
-	def _metric_to_metric_prompt(metric_name="security"):
-		"""
-		Convert a metric name to a human-readable description.
-		Replaces trading metric mapping with security metrics.
-
-		Args:
-		    metric_name (str, optional): Name of the metric. Defaults to "security".
-
-		Returns:
-		    str: Human-readable description of the metric
-		"""
-		try:
-			mapping = {
-				"security": "your wallet security and threat protection",
-				"threats": "detected threats and risk levels",
-				"quarantine": "quarantined suspicious items"
-			}
-
-			return mapping[metric_name]
-		except KeyError as e:
-			raise KeyError(f"Expected metric_name to be in ['security', 'threats', 'quarantine'], {e}")
-
-	def _extract_default_placeholders(self) -> Dict[str, Set[str]]:
-		"""
-		Extract placeholders from default prompts to use as required placeholders.
-		Same logic as TradingPromptGenerator.
-		"""
-		placeholder_pattern = re.compile(r"{([^}]+)}")
-		return {
-			prompt_name: {
-				f"{{{p}}}" for p in placeholder_pattern.findall(prompt_content)
-			}
-			for prompt_name, prompt_content in self.get_default_prompts().items()
-		}
-
-	def _validate_prompts(self, prompts: Dict[str, str]) -> None:
-		"""
-		Validate prompts for required and unexpected placeholders.
-		Same validation logic as TradingPromptGenerator.
-		"""
-		required_placeholders = self._extract_default_placeholders()
-
-		# Check all required prompts exist
-		missing_prompts = set(required_placeholders.keys()) - set(prompts.keys())
-		if missing_prompts:
-			raise ValueError(f"Missing required prompts: {missing_prompts}")
-
-		# Extract placeholders using regex
-		placeholder_pattern = re.compile(r"{([^}]+)}")
-
-		# Check each prompt for missing and unexpected placeholders
-		for prompt_name, prompt_content in prompts.items():
-			if prompt_name not in required_placeholders:
-				continue
-
-			actual_placeholders = {
-				f"{{{p}}}" for p in placeholder_pattern.findall(prompt_content)
-			}
-			required_set = required_placeholders[prompt_name]
-
-			# Check for missing placeholders
-			missing = required_set - actual_placeholders
-			if missing:
-				raise ValueError(
-					f"Missing required placeholders in {prompt_name}: {missing}"
-				)
-
-			# Check for unexpected placeholders
-			unexpected = actual_placeholders - required_set
-			if unexpected:
-				raise ValueError(
-					f"Unexpected placeholders in {prompt_name}: {unexpected}"
-				)
-
-	def generate_system_prompt(
-		self, role: str, time: str, metric_name: str, metric_state: str, network: str
-	) -> str:
-		"""
-		Generate a system prompt for the security agent.
-		Follows exact same pattern as TradingPromptGenerator.generate_system_prompt.
-
-		Args:
-		    role (str): The role of the agent (e.g., "security_analyst")
-		    time (str): Time frame for the security monitoring
-		    metric_name (str): Name of the security metric to track
-		    metric_state (str): Current state of the security metric
-		    network (str): Blockchain network being monitored
-
-		Returns:
-		    str: Formatted system prompt
-		"""
-		now = datetime.now()
-		today_date = now.strftime("%Y-%m-%d")
-
-		# Parse the metric state to extract security status
-		try:
-			metric_data = eval(metric_state)
-			if isinstance(metric_data, dict) and "security_score" in metric_data:
-				# Show security-relevant information
-				metric_state = str({
-					"security_score": metric_data["security_score"],
-					"threats_detected": metric_data.get("total_threats_detected", 0),
-					"quarantined_items": metric_data.get("quarantined_items", 0),
-					"monitored_wallets": len(metric_data.get("monitored_wallets", [])),
-				})
-		except (ValueError, TypeError):
-			pass  # Keep original metric_state if parsing fails
-
-		return self.prompts["system_prompt"].format(
-			role=role,
-			today_date=today_date,
-			metric_name=metric_name,
-			time=time,
-			network=network,
-			metric_state=metric_state,
-		)
-
-	def generate_analysis_code_first_time_prompt(self, apis: List[str], network: str):
-		"""
-		Generate a prompt for first-time security analysis code generation.
-		Replaces generate_research_code_first_time_prompt from TradingPromptGenerator.
-		"""
-		apis_str = ",\n".join(apis) if apis else self._get_default_apis_str()
-
-		return self.prompts["analysis_code_prompt_first"].format(
-			apis_str=apis_str, network=network
-		)
-
-	def generate_analysis_code_prompt(
-		self,
-		notifications_str: str,
-		apis: List[str],
-		prev_analysis: str,
-		rag_summary: str,
-		before_metric_state: str,
-		after_metric_state: str,
-	):
-		"""
-		Generate a prompt for security analysis code generation with context.
-		Replaces generate_research_code_prompt from TradingPromptGenerator.
-		"""
-		apis_str = ",\n".join(apis) if apis else self._get_default_apis_str()
-
-		return self.prompts["analysis_code_prompt"].format(
-			notifications_str=notifications_str,
-			apis_str=apis_str,
-			prev_analysis=prev_analysis,
-			rag_summary=rag_summary,
-			before_metric_state=before_metric_state,
-			after_metric_state=after_metric_state,
-		)
-
-	def _get_default_apis_str(self) -> str:
-		"""
-		Get default security APIs string.
-		Replaces trading APIs with security-focused APIs.
-		"""
-		return dedent("""
-			Solana RPC API - Real-time blockchain monitoring
-			Meta-Swap Security API - Threat detection and quarantine
-			Threat Intelligence Database - Known scammer addresses
-			Transaction Pattern Analysis - Behavioral detection
-			Token Metadata Verification - Scam token identification
-		""").strip()
+    @staticmethod
+    def get_default_prompts() -> Dict[str, str]:
+        """Default prompts for security operations with chain of thought reasoning"""
+        return {
+            "system": dedent("""
+                You are a Web3 wallet security analyst specializing in blockchain threat detection.
+                
+                Your role: {role}
+                Time horizon: {time}
+                Network: {network}
+                Current security metric: {metric_name}
+                Security state: {metric_state}
+                
+                Your capabilities:
+                - Analyze blockchain transactions for security threats
+                - Detect scams, drains, MEV attacks, and suspicious patterns
+                - Make quarantine decisions with confidence scores
+                - Provide clear chain of thought reasoning for all decisions
+                
+                Always show your reasoning step by step so users understand your analysis.
+            """).strip(),
+            
+            "analysis_code_prompt": dedent("""
+                Generate Python code to analyze security threats in blockchain transactions.
+                
+                Security notifications: {notifications_str}
+                Available APIs: {apis_str}
+                Previous analysis: {prev_analysis}
+                RAG security intelligence: {rag_summary}
+                
+                Create code that:
+                1. Fetches recent transaction data
+                2. Analyzes for known threat patterns
+                3. Checks addresses against threat databases
+                4. Calculates risk scores with reasoning
+                5. Provides detailed threat assessment
+                
+                Use chain of thought reasoning in your analysis.
+            """).strip(),
+            
+            "analysis_code_on_first_prompt": dedent("""
+                Generate initial security analysis code for baseline monitoring.
+                
+                Available APIs: {apis_str}
+                Network: {network}
+                
+                Create code that establishes security monitoring and provides initial threat assessment.
+                Show your analytical reasoning throughout the process.
+            """).strip(),
+            
+            "strategy_prompt": dedent("""
+                Based on security analysis results, formulate a comprehensive security strategy.
+                
+                Analysis results: {analysis_results}
+                Current security state: {before_metric_state}
+                
+                Create a strategy with:
+                1. Threat assessment with chain of thought reasoning
+                2. Risk prioritization with evidence
+                3. Recommended quarantine actions with confidence levels
+                4. User education about identified threats
+                5. Monitoring adjustments based on findings
+                
+                Explain your reasoning for each strategic decision.
+            """).strip(),
+            
+            "quarantine_code_prompt": dedent("""
+                Generate code to implement security actions based on the strategy.
+                
+                Security strategy: {strategy_output}
+                Available APIs: {apis_str}
+                Security tools: {security_tools_str}
+                Meta-swap API: {meta_swap_api_url}
+                
+                Implement:
+                1. Quarantine decisions with confidence thresholds
+                2. Automatic blocking for high-confidence threats
+                3. User review flags for medium-confidence threats
+                4. Detailed logging with reasoning chains
+                5. Security monitoring updates
+                
+                Show decision logic and reasoning for all actions taken.
+            """).strip(),
+            
+            "regen_code_prompt": dedent("""
+                Fix errors in security code while maintaining threat detection logic.
+                
+                Errors: {errors}
+                Previous code: {previous_code}
+                
+                Generate corrected code that fixes the errors while preserving security effectiveness.
+                Include proper error handling and maintain chain of thought reasoning.
+            """).strip()
+        }
 
 
 class SecurityAgent:
-	"""
-	Agent responsible for executing security strategies based on blockchain data and threat notifications.
-	Follows exact same structure as TradingAgent but for security operations.
+    """
+    Security agent that analyzes threats and manages quarantine decisions.
+    Follows the same architectural pattern as TradingAgent but for security operations.
+    """
 
-	This class orchestrates the entire security workflow, including system preparation,
-	analysis code generation, threat detection, and protective action execution.
-	"""
+    def __init__(self, agent_id: str, rag: RAGClient, db: DBInterface,
+                 sensor: SecuritySensor, genner: Genner, 
+                 container_manager: ContainerManager,
+                 prompt_generator: SecurityPromptGenerator):
+        """Initialize security agent with all required framework components"""
+        self.agent_id = agent_id
+        self.db = db
+        self.rag = rag
+        self.sensor = sensor
+        self.genner = genner
+        self.container_manager = container_manager
+        self.prompt_generator = prompt_generator
+        
+        self.chat_history = ChatHistory()
+        
+        # Quarantine management - core security execution logic
+        self.quarantined_items: Dict[str, QuarantineItem] = {}
+        self.approved_items: Dict[str, QuarantineItem] = {}
+        self.burned_items: Dict[str, QuarantineItem] = {}
+        
+        # Security configuration
+        self.quarantine_threshold = 0.7
+        self.auto_burn_threshold = 0.9
+        self.auto_burn_delay_hours = 168  # 7 days
+        
+        # Security statistics
+        self.security_stats = {
+            'total_quarantined': 0,
+            'total_approved': 0,
+            'total_burned': 0,
+            'auto_burned': 0,
+            'threats_detected': 0,
+            'false_positives': 0
+        }
 
-	def __init__(
-		self,
-		agent_id: str,
-		rag: RAGClient,
-		db: DBInterface,
-		sensor: SecuritySensor,
-		genner: Genner,
-		container_manager: ContainerManager,
-		prompt_generator: SecurityPromptGenerator,
-	):
-		"""
-		Initialize the security agent with all required components.
-		Follows exact same __init__ pattern as TradingAgent.
+    def reset(self) -> None:
+        """Reset agent's chat history for new analysis session"""
+        self.chat_history = ChatHistory()
 
-		Args:
-		    agent_id (str): Unique identifier for this agent
-		    rag (RAGClient): Client for retrieval-augmented generation (threat intelligence)
-		    db (DBInterface): Database client for storing and retrieving data
-		    sensor (SecuritySensor): Sensor for monitoring security-related metrics
-		    genner (Genner): Generator for creating code and strategies
-		    container_manager (ContainerManager): Manager for code execution in containers
-		    prompt_generator (SecurityPromptGenerator): Generator for creating prompts
-		"""
-		self.agent_id = agent_id
-		self.db = db
-		self.rag = rag
-		self.sensor = sensor
-		self.genner = genner
-		self.container_manager = container_manager
-		self.prompt_generator = prompt_generator
+    def prepare_system(self, role: str, time: str, metric_name: str, 
+                      metric_state: str, network: str) -> ChatHistory:
+        """Prepare system prompt for security analysis context"""
+        system_prompt = self.prompt_generator.generate_system_prompt(
+            role=role, time=time, metric_name=metric_name,
+            metric_state=metric_state, network=network
+        )
+        
+        return ChatHistory(Message(role="system", content=system_prompt))
 
-		self.chat_history = ChatHistory()
+    def gen_analysis_code_on_first(self, apis: List[str], network: str) -> Result[Tuple[str, ChatHistory], str]:
+        """Generate initial security analysis code for first-time setup"""
+        try:
+            apis_str = '\n'.join([f"- {api}" for api in apis])
+            
+            prompt = self.prompt_generator.prompts['analysis_code_on_first_prompt'].format(
+                apis_str=apis_str,
+                network=network
+            )
+            
+            instruction_message = Message(role="user", content=prompt)
+            
+            response = self.genner.generate_completion([instruction_message])
+            response_message = Message(role="assistant", content=response)
+            
+            new_chat_history = ChatHistory([instruction_message, response_message])
+            
+            return Ok((response, new_chat_history))
+            
+        except Exception as e:
+            return Err(f"Failed to generate analysis code: {str(e)}")
 
-	def reset(self) -> None:
-		"""
-		Reset the agent's chat history.
-		Same as TradingAgent.reset().
-		"""
-		self.chat_history = ChatHistory()
+    def gen_analysis_code(self, notifications_str: str, apis: List[str],
+                         prev_analysis: str, rag_summary: str,
+                         before_metric_state: str, after_metric_state: str) -> Result[Tuple[str, ChatHistory], str]:
+        """Generate security analysis code based on notifications and context"""
+        try:
+            apis_str = '\n'.join([f"- {api}" for api in apis])
+            
+            prompt = self.prompt_generator.generate_analysis_code_prompt(
+                notifications_str=notifications_str,
+                apis=apis_str,
+                prev_analysis=prev_analysis,
+                rag_summary=rag_summary,
+                before_metric_state=before_metric_state,
+                after_metric_state=after_metric_state
+            )
+            
+            instruction_message = Message(role="user", content=prompt)
+            
+            response = self.genner.generate_completion(
+                self.chat_history.messages + [instruction_message]
+            )
+            response_message = Message(role="assistant", content=response)
+            
+            new_chat_history = ChatHistory([instruction_message, response_message])
+            
+            return Ok((response, new_chat_history))
+            
+        except Exception as e:
+            return Err(f"Failed to generate analysis code: {str(e)}")
 
-	def prepare_system(
-		self, role: str, time: str, metric_name: str, metric_state: str, network: str
-	) -> ChatHistory:
-		"""
-		Prepare the system prompt for the security agent.
-		Follows exact same pattern as TradingAgent.prepare_system.
+    def gen_security_strategy(self, analysis_results: str, apis: List[str],
+                            before_metric_state: str, network: str, time: str) -> Result[Tuple[str, ChatHistory], str]:
+        """Generate security strategy based on threat analysis results"""
+        try:
+            apis_str = '\n'.join([f"- {api}" for api in apis])
+            
+            prompt = self.prompt_generator.prompts['strategy_prompt'].format(
+                analysis_results=analysis_results,
+                apis_str=apis_str,
+                before_metric_state=before_metric_state,
+                network=network,
+                time=time
+            )
+            
+            instruction_message = Message(role="user", content=prompt)
+            
+            response = self.genner.generate_completion(
+                self.chat_history.messages + [instruction_message]
+            )
+            response_message = Message(role="assistant", content=response)
+            
+            new_chat_history = ChatHistory([instruction_message, response_message])
+            
+            return Ok((response, new_chat_history))
+            
+        except Exception as e:
+            return Err(f"Failed to generate security strategy: {str(e)}")
 
-		Args:
-		    role (str): The role of the agent (e.g., "security_analyst")
-		    time (str): Time frame for security monitoring
-		    metric_name (str): Name of the security metric to track
-		    metric_state (str): Current state of security metrics
-		    network (str): Blockchain network being monitored
+    def gen_quarantine_code(self, strategy_output: str, apis: List[str],
+                          metric_state: str, security_tools: List[str],
+                          meta_swap_api_url: str, network: str) -> Result[Tuple[str, ChatHistory], str]:
+        """Generate code to implement quarantine and security actions"""
+        try:
+            apis_str = '\n'.join([f"- {api}" for api in apis])
+            
+            prompt = self.prompt_generator.generate_quarantine_code_prompt(
+                strategy_output=strategy_output,
+                apis=apis_str,
+                metric_state=metric_state,
+                security_tools=security_tools,
+                meta_swap_api_url=meta_swap_api_url,
+                network=network
+            )
+            
+            instruction_message = Message(role="user", content=prompt)
+            
+            response = self.genner.generate_completion(
+                self.chat_history.messages + [instruction_message]
+            )
+            response_message = Message(role="assistant", content=response)
+            
+            new_chat_history = ChatHistory([instruction_message, response_message])
+            
+            return Ok((response, new_chat_history))
+            
+        except Exception as e:
+            return Err(f"Failed to generate quarantine code: {str(e)}")
 
-		Returns:
-		    ChatHistory: Chat history with the system prompt
-		"""
-		ctx_ch = ChatHistory(
-			Message(
-				role="system",
-				content=self.prompt_generator.generate_system_prompt(
-					role=role,
-					time=time,
-					metric_name=metric_name,
-					metric_state=metric_state,
-					network=network,
-				),
-			)
-		)
+    def regen_on_error(self, errors: str, latest_response: str) -> Result[str, str]:
+        """Regenerate code when errors occur, maintaining security logic"""
+        try:
+            prompt = self.prompt_generator.prompts['regen_code_prompt'].format(
+                errors=errors,
+                previous_code=latest_response
+            )
+            
+            instruction_message = Message(role="user", content=prompt)
+            
+            response = self.genner.generate_completion(
+                self.chat_history.messages + [instruction_message]
+            )
+            
+            return Ok(response)
+            
+        except Exception as e:
+            return Err(f"Failed to regenerate code: {str(e)}")
 
-		return ctx_ch
+    # Core quarantine management methods - security execution logic
 
-	def gen_analysis_code_on_first(
-		self, apis: List[str], network: str
-	) -> Result[Tuple[str, ChatHistory], str]:
-		"""
-		Generate security analysis code for the first time.
-		Replaces gen_research_code_on_first from TradingAgent.
+    def evaluate_for_quarantine(self, item_data: Dict, risk_score: float, reasoning: str) -> bool:
+        """Determine if security item should be quarantined based on risk assessment"""
+        should_quarantine = risk_score > self.quarantine_threshold
+        
+        if should_quarantine:
+            self.quarantine_item(item_data, risk_score, reasoning)
+            return True
+        
+        return False
 
-		Args:
-		    apis (List[str]): List of security APIs available
-		    network (str): Blockchain network to monitor
+    def quarantine_item(self, item_data: Dict, risk_score: float, reasoning: str) -> QuarantineItem:
+        """Place security threat in quarantine with detailed reasoning"""
+        quarantine_item = QuarantineItem(item_data, risk_score, reasoning)
+        
+        self.quarantined_items[quarantine_item.id] = quarantine_item
+        self.security_stats['total_quarantined'] += 1
+        self.security_stats['threats_detected'] += 1
+        
+        print(f"🚨 QUARANTINED: {quarantine_item.id}")
+        print(f"   Risk Score: {risk_score:.2f}")
+        print(f"   Reasoning: {reasoning}")
+        
+        # Chain of thought logging
+        if risk_score > self.auto_burn_threshold:
+            print(f"   → High confidence threat, scheduled for auto-burn in {self.auto_burn_delay_hours}h")
+        
+        return quarantine_item
 
-		Returns:
-		    Result: Success with (code, chat_history) or Error with message
-		"""
-		ctx_ch = self.chat_history
-		user_prompt = self.prompt_generator.generate_analysis_code_first_time_prompt(
-			apis, network
-		)
+    def approve_quarantined_item(self, item_id: str, user_feedback: str = "") -> bool:
+        """Approve quarantined item based on user review or false positive detection"""
+        if item_id not in self.quarantined_items:
+            return False
+        
+        item = self.quarantined_items[item_id]
+        item.status = QuarantineStatus.APPROVED
+        item.reviewed_at = datetime.now()
+        item.user_decision = "approved"
+        
+        # Move from quarantine to approved storage
+        self.approved_items[item_id] = item
+        del self.quarantined_items[item_id]
+        
+        self.security_stats['total_approved'] += 1
+        
+        print(f"✅ APPROVED: {item_id}")
+        if user_feedback:
+            print(f"   User feedback: {user_feedback}")
+            # Learn from false positive for future improvements
+            self.security_stats['false_positives'] += 1
+        
+        return True
 
-		ctx_ch.add_message(Message(role="user", content=user_prompt))
+    def burn_quarantined_item(self, item_id: str, auto_burn: bool = False, user_feedback: str = "") -> bool:
+        """Permanently remove quarantined threat item"""
+        if item_id not in self.quarantined_items:
+            return False
+        
+        item = self.quarantined_items[item_id]
+        item.status = QuarantineStatus.BURNED
+        item.reviewed_at = datetime.now()
+        
+        if auto_burn:
+            item.user_decision = "auto_burned"
+            self.security_stats['auto_burned'] += 1
+        else:
+            item.user_decision = "user_burned"
+        
+        # Move from quarantine to burned storage for audit trail
+        self.burned_items[item_id] = item
+        del self.quarantined_items[item_id]
+        
+        self.security_stats['total_burned'] += 1
+        
+        burn_type = "🔥 AUTO-BURNED" if auto_burn else "🗑️ BURNED"
+        print(f"{burn_type}: {item_id}")
+        if user_feedback:
+            print(f"   User feedback: {user_feedback}")
+        
+        return True
 
-		response = self.genner.gen(ctx_ch.messages)
-		if isinstance(response, Err):
-			return response
+    def get_quarantine_summary(self) -> Dict:
+        """Get comprehensive summary of quarantine status and security metrics"""
+        current_time = datetime.now()
+        
+        # Check for items ready for auto-burn
+        auto_burn_ready = []
+        for item in self.quarantined_items.values():
+            if item.auto_burn_at and current_time >= item.auto_burn_at:
+                auto_burn_ready.append(item.id)
+        
+        return {
+            'summary': {
+                'total_quarantined': len(self.quarantined_items),
+                'total_approved': len(self.approved_items),
+                'total_burned': len(self.burned_items),
+                'auto_burn_ready': len(auto_burn_ready),
+                'last_updated': current_time.isoformat()
+            },
+            'statistics': self.security_stats,
+            'quarantined_items': [
+                {
+                    'id': item.id,
+                    'risk_score': item.risk_score,
+                    'reasoning': item.reasoning,
+                    'quarantined_at': item.quarantined_at.isoformat(),
+                    'auto_burn_at': item.auto_burn_at.isoformat() if item.auto_burn_at else None,
+                    'days_in_quarantine': (current_time - item.quarantined_at).days
+                }
+                for item in self.quarantined_items.values()
+            ],
+            'auto_burn_ready': auto_burn_ready
+        }
 
-		ctx_ch.add_message(Message(role="assistant", content=response.unwrap()))
-
-		self.chat_history = ctx_ch
-
-		return Ok((response.unwrap(), ctx_ch))
-
-	def gen_analysis_code(
-		self,
-		notifications_str: str,
-		apis: List[str],
-		prev_analysis: str,
-		rag_summary: str,
-		before_metric_state: str,
-		after_metric_state: str,
-	) -> Result[Tuple[str, ChatHistory], str]:
-		"""
-		Generate security analysis code with context.
-		Replaces gen_research_code from TradingAgent.
-		"""
-		ctx_ch = self.chat_history
-		user_prompt = self.prompt_generator.generate_analysis_code_prompt(
-			notifications_str,
-			apis,
-			prev_analysis,
-			rag_summary,
-			before_metric_state,
-			after_metric_state,
-		)
-
-		ctx_ch.add_message(Message(role="user", content=user_prompt))
-
-		response = self.genner.gen(ctx_ch.messages)
-		if isinstance(response, Err):
-			return response
-
-		ctx_ch.add_message(Message(role="assistant", content=response.unwrap()))
-
-		self.chat_history = ctx_ch
-
-		return Ok((response.unwrap(), ctx_ch))
-
-	def gen_security_strategy(
-		self,
-		analysis_results: str,
-		apis: List[str],
-		before_metric_state: str,
-		network: str,
-		time: str,
-	) -> Result[Tuple[str, ChatHistory], str]:
-		"""
-		Generate security strategy based on analysis results.
-		Replaces gen_strategy from TradingAgent.
-		"""
-		ctx_ch = self.chat_history
-		user_prompt = self.prompt_generator.prompts["strategy_prompt"].format(
-			research_results=analysis_results,
-			apis_str=",\n".join(apis),
-			before_metric_state=before_metric_state,
-			network=network,
-			time=time,
-		)
-
-		ctx_ch.add_message(Message(role="user", content=user_prompt))
-
-		response = self.genner.gen(ctx_ch.messages)
-		if isinstance(response, Err):
-			return response
-
-		ctx_ch.add_message(Message(role="assistant", content=response.unwrap()))
-
-		self.chat_history = ctx_ch
-
-		return Ok((response.unwrap(), ctx_ch))
-
-	def gen_quarantine_code(
-		self,
-		strategy_output: str,
-		apis: List[str],
-		metric_state: str,
-		security_tools: List[str],
-		meta_swap_api_url: str,
-		network: str,
-	) -> Result[Tuple[str, ChatHistory], str]:
-		"""
-		Generate code to implement security strategy (quarantine, block, etc.).
-		Replaces gen_trading_code from TradingAgent.
-		"""
-		ctx_ch = self.chat_history
-		
-		quarantine_tools = self.prompt_generator._security_tools_to_api_prompt(
-			security_tools, meta_swap_api_url, self.agent_id, "session_id"
-		)
-		
-		user_prompt = self.prompt_generator.prompts["quarantine_code_prompt"].format(
-			strategy_output=strategy_output,
-			apis_str=",\n".join(apis),
-			metric_state=metric_state,
-			quarantine_tools=quarantine_tools,
-			network=network,
-		)
-
-		ctx_ch.add_message(Message(role="user", content=user_prompt))
-
-		response = self.genner.gen(ctx_ch.messages)
-		if isinstance(response, Err):
-			return response
-
-		ctx_ch.add_message(Message(role="assistant", content=response.unwrap()))
-
-		self.chat_history = ctx_ch
-
-		return Ok((response.unwrap(), ctx_ch))
-
-	def regen_on_error(self, errors: str, latest_response: str) -> Result[str, str]:
-		"""
-		Regenerate code when errors occur.
-		Same as TradingAgent.regen_on_error.
-		"""
-		user_prompt = self.prompt_generator.prompts["regen_code_prompt"].format(
-			errors=errors, latest_response=latest_response
-		)
-
-		ctx_ch = self.chat_history
-		ctx_ch.add_message(Message(role="user", content=user_prompt))
-
-		response = self.genner.gen(ctx_ch.messages)
-		if isinstance(response, Err):
-			return response
-
-		ctx_ch.add_message(Message(role="assistant", content=response.unwrap()))
-
-		self.chat_history = ctx_ch
-
-		return response
+    def get_security_metrics(self) -> Dict:
+        """Get current security performance metrics for monitoring"""
+        total_decisions = self.security_stats['threats_detected']
+        accuracy_rate = 1.0 - (self.security_stats['false_positives'] / max(total_decisions, 1))
+        
+        return {
+            'threat_detection_rate': self.security_stats['threats_detected'],
+            'quarantine_accuracy': accuracy_rate,
+            'auto_burn_rate': self.security_stats['auto_burned'] / max(self.security_stats['total_burned'], 1),
+            'user_approval_rate': self.security_stats['total_approved'] / max(total_decisions, 1),
+            'current_quarantine_count': len(self.quarantined_items),
+            'system_confidence': min(accuracy_rate + 0.1, 1.0)  # Bounded confidence score
+        }

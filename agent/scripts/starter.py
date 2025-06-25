@@ -1,7 +1,6 @@
 import asyncio
 import os
 import requests
-import tweepy
 import inquirer
 import time
 
@@ -10,13 +9,10 @@ from src.client.rag import RAGClient
 from tests.mock_client.rag import MockRAGClient
 from tests.mock_client.interface import RAGInterface
 from tests.mock_sensor.security import MockSecuritySensor
-from tests.mock_sensor.marketing import MockMarketingSensor
-from src.sensor.marketing import MarketingSensor
 from src.sensor.security import SecuritySensor
-from src.sensor.interface import SecuritySensorInterface, MarketingSensorInterface
+from src.sensor.interface import SecuritySensorInterface
 from src.db import DBInterface
 from typing import Callable
-from src.agent.marketing import MarketingAgent, MarketingPromptGenerator
 from src.agent.security import SecurityAgent, SecurityPromptGenerator
 from src.datatypes import StrategyData
 from src.container import ContainerManager
@@ -32,13 +28,10 @@ from anthropic import Anthropic
 import docker
 from functools import partial
 from src.flows.security import assisted_flow as security_assisted_flow
-from src.flows.marketing import unassisted_flow as marketing_unassisted_flow
 from loguru import logger
 from src.constants import SERVICE_TO_ENV
-from src.constants import FE_DATA_MARKETING_DEFAULTS
 from src.manager import fetch_default_prompt
 from dotenv import load_dotenv
-from src.twitter import TweepyTwitterClient
 
 load_dotenv()
 
@@ -56,76 +49,6 @@ FE_DATA_SECURITY_DEFAULTS = {
 	"metric_name": "security",
 	"notifications": ["blockchain_alerts"],
 }
-
-
-def start_marketing_agent(
-	agent_type: str,
-	session_id: str,
-	agent_id: str,
-	fe_data: dict,
-	genner: Genner,
-	rag: RAGInterface,
-	sensor: MarketingSensorInterface,
-	db: DBInterface,
-	stream_fn: Callable[[str], None] = lambda x: print(x, flush=True, end=""),
-):
-	"""Start marketing agent with social media monitoring"""
-	role = fe_data["role"]
-	time_ = fe_data["time"]
-	metric_name = fe_data["metric_name"]
-	notif_sources = fe_data["notifications"]
-	services_used = fe_data["research_tools"]
-
-	in_con_env = services_to_envs(services_used)
-	apis = services_to_prompts(services_used)
-
-	if fe_data["model"] == "deepseek":
-		fe_data["model"] = "deepseek_or"
-
-	prompt_generator = MarketingPromptGenerator(fe_data["prompts"])
-
-	container_manager = ContainerManager(
-		docker.from_env(),
-		"superioragents/agent-executor:latest",
-		"./code",
-		in_con_env=in_con_env,
-	)
-
-	summarizer = get_summarizer(genner)
-	previous_strategies = db.fetch_all_strategies(agent_id)
-
-	rag.save_result_batch_v4(previous_strategies)
-
-	agent = MarketingAgent(
-		agent_id=agent_id,
-		sensor=sensor,
-		genner=genner,
-		container_manager=container_manager,
-		prompt_generator=prompt_generator,
-		db=db,
-		rag=rag,
-	)
-
-	flow_func = partial(
-		marketing_unassisted_flow,
-		agent=agent,
-		session_id=session_id,
-		role=role,
-		time=time_,
-		apis=apis,
-		metric_name=metric_name,
-		summarizer=summarizer,
-	)
-
-	run_cycle(
-		agent,
-		notif_sources,
-		flow_func,
-		db,
-		session_id,
-		agent_id,
-		fe_data if agent_type == "marketing" else None,
-	)
 
 
 def start_security_agent(
@@ -199,12 +122,12 @@ def start_security_agent(
 		db,
 		session_id,
 		agent_id,
-		fe_data if agent_type == "security" else None,
+		fe_data,
 	)
 
 
 def run_cycle(
-	agent,
+	agent: SecurityAgent,
 	notif_sources: list[str],
 	flow: Callable[[StrategyData | None, str | None], None],
 	db: DBInterface,
@@ -212,48 +135,21 @@ def run_cycle(
 	agent_id: str,
 	fe_data: dict | None = None,
 ):
-	"""Execute agent workflow cycle with previous strategy context"""
+	"""Execute security agent workflow cycle with previous strategy context"""
 	prev_strat = agent.db.fetch_latest_strategy(agent.agent_id)
 	if prev_strat is not None:
-		logger.info(f"Previous strat is {prev_strat}")
+		logger.info(f"Previous security strategy is {prev_strat}")
 		agent.rag.save_result_batch_v4([prev_strat])
 
 	notif_limit = 5 if fe_data is None else 2
 	current_notif = agent.db.fetch_latest_notification_str_v2(
 		notif_sources, notif_limit
 	)
-	logger.info(f"Latest notification is {current_notif}")
-	logger.info("Added the previous strat onto the RAG manager")
+	logger.info(f"Latest security notification is {current_notif}")
+	logger.info("Added the previous security strategy onto the RAG manager")
 
 	flow(prev_strat=prev_strat, notif_str=current_notif)
 	db.add_cycle_count(session_id, agent_id)
-
-
-def setup_marketing_sensor() -> MarketingSensorInterface:
-	"""Initialize Twitter-based marketing sensor"""
-	TWITTER_API_KEY = os.environ["TWITTER_API_KEY"]
-	TWITTER_API_KEY_SECRET = os.environ["TWITTER_API_KEY_SECRET"]
-	TWITTER_ACCESS_TOKEN = os.environ["TWITTER_ACCESS_TOKEN"]
-	TWITTER_ACCESS_TOKEN_SECRET = os.environ["TWITTER_ACCESS_TOKEN_SECRET"]
-	auth = tweepy.OAuth1UserHandler(
-		consumer_key=TWITTER_API_KEY,
-		consumer_secret=TWITTER_API_KEY_SECRET,
-		access_token=TWITTER_ACCESS_TOKEN,
-		access_token_secret=TWITTER_ACCESS_TOKEN_SECRET,
-	)
-
-	twitter_client = TweepyTwitterClient(
-		client=tweepy.Client(
-			consumer_key=TWITTER_API_KEY,
-			consumer_secret=TWITTER_API_KEY_SECRET,
-			access_token=TWITTER_ACCESS_TOKEN,
-			access_token_secret=TWITTER_ACCESS_TOKEN_SECRET,
-			wait_on_rate_limit=True,
-		),
-		api_client=tweepy.API(auth),
-	)
-	sensor = MarketingSensor(twitter_client)
-	return sensor
 
 
 def setup_security_sensor() -> SecuritySensorInterface:
@@ -289,17 +185,19 @@ def extra_research_tools_questions(answer_research_tools):
 	questions_rt = []
 	var_rt = []
 	for research_tool in answer_research_tools:
-		for env in SERVICE_TO_ENV[research_tool]:
-			if not os.getenv(env):
-				var_rt.append(env)
-				questions_rt.append(
-					inquirer.Text(
-						name=env, message=f"Please enter value for this variable {env}"
+		if research_tool in SERVICE_TO_ENV:
+			for env in SERVICE_TO_ENV[research_tool]:
+				if not os.getenv(env):
+					var_rt.append(env)
+					questions_rt.append(
+						inquirer.Text(
+							name=env, message=f"Please enter value for this variable {env}"
+						)
 					)
-				)
-	answers_rt = inquirer.prompt(questions_rt)
-	for env in var_rt:
-		os.environ[env] = answers_rt[env]
+	if questions_rt:
+		answers_rt = inquirer.prompt(questions_rt)
+		for env in var_rt:
+			os.environ[env] = answers_rt[env]
 
 
 def extra_model_questions(answer_model):
@@ -342,170 +240,137 @@ def extra_model_questions(answer_model):
 	return model_naming[answer_model]
 
 
-def extra_sensor_questions(answers_agent_type):
-	"""Configure sensors based on agent type"""
-	if answers_agent_type == "security":
-		sensor_api_keys = ["HELIUS_API_KEY", "SOLANA_RPC_URL"]
-		question_security_sensor = [
-			inquirer.List(
-				name="sensor",
-				message=f"Do you have these API keys {', '.join(sensor_api_keys)} ?",
-				choices=[
-					"No, I'm using Mock Security Sensor for now",
-					"Yes, i have these keys",
-				],
+def extra_sensor_questions():
+	"""Configure security sensor for Solana monitoring"""
+	sensor_api_keys = ["HELIUS_API_KEY", "SOLANA_RPC_URL"]
+	question_security_sensor = [
+		inquirer.List(
+			name="sensor",
+			message=f"Do you have these API keys {', '.join(sensor_api_keys)} ?",
+			choices=[
+				"No, I'm using Mock Security Sensor for now",
+				"Yes, i have these keys",
+			],
+		)
+	]
+	answer_security_sensor = inquirer.prompt(question_security_sensor)
+	if answer_security_sensor["sensor"] == "Yes, i have these keys":
+		sensor_api_keys = [x for x in sensor_api_keys if not os.getenv(x)]
+		question_sensor_api_keys = [
+			inquirer.Text(
+				name=x, message=f"Please enter value for this variable {x}"
 			)
+			for x in sensor_api_keys
+			if not os.getenv(x)
 		]
-		answer_security_sensor = inquirer.prompt(question_security_sensor)
-		if answer_security_sensor["sensor"] == "Yes, i have these keys":
-			sensor_api_keys = [x for x in sensor_api_keys if not os.getenv(x)]
-			question_sensor_api_keys = [
-				inquirer.Text(
-					name=x, message=f"Please enter value for this variable {x}"
-				)
-				for x in sensor_api_keys
-				if not os.getenv(x)
-			]
-			if question_sensor_api_keys:
-				answer_sensor_api_keys = inquirer.prompt(question_sensor_api_keys)
-				for x in sensor_api_keys:
-					if x in answer_sensor_api_keys:
-						os.environ[x] = answer_sensor_api_keys[x]
-			
-			sensor = setup_security_sensor()
-		else:
-			sensor = MockSecuritySensor(
-				wallet_addresses=["mock_wallet_1", "mock_wallet_2"],
-				solana_rpc_url="mock://solana-rpc",
-				helius_api_key="mock_helius_key"
-			)
-
-	elif answers_agent_type == "marketing":
-		sensor_api_keys = [
-			"TWITTER_API_KEY",
-			"TWITTER_API_KEY_SECRET",
-			"TWITTER_ACCESS_TOKEN",
-			"TWITTER_ACCESS_TOKEN_SECRET",
-		]
-		question_marketing_sensor = [
-			inquirer.List(
-				name="sensor",
-				message=f"Do you have these API keys {', '.join(sensor_api_keys)} ?",
-				choices=[
-					"No, I'm using Mock Marketing Sensor for now",
-					"Yes, i have these keys",
-				],
-			)
-		]
-		answer_marketing_sensor = inquirer.prompt(question_marketing_sensor)
-		if answer_marketing_sensor["sensor"] == "Yes, i have these keys":
-			sensor_api_keys = [x for x in sensor_api_keys if not os.getenv(x)]
-			question_sensor_api_keys = [
-				inquirer.Text(
-					name=x, message=f"Please enter value for this variable {x}"
-				)
-				for x in sensor_api_keys
-				if not os.getenv(x)
-			]
-			if question_sensor_api_keys:
-				answer_sensor_api_keys = inquirer.prompt(question_sensor_api_keys)
-				for x in sensor_api_keys:
+		if question_sensor_api_keys:
+			answer_sensor_api_keys = inquirer.prompt(question_sensor_api_keys)
+			for x in sensor_api_keys:
+				if x in answer_sensor_api_keys:
 					os.environ[x] = answer_sensor_api_keys[x]
-			
-			sensor = setup_marketing_sensor()
-		else:
-			sensor = MockMarketingSensor()
+		
+		sensor = setup_security_sensor()
+	else:
+		sensor = MockSecuritySensor(
+			wallet_addresses=["mock_wallet_1", "mock_wallet_2"],
+			solana_rpc_url="mock://solana-rpc",
+			helius_api_key="mock_helius_key"
+		)
 
 	return sensor
 
 
-def extra_rag_questions(answer_rag, agent_type):
+def extra_rag_questions(answer_rag):
 	"""Configure RAG client based on setup status"""
-	if "Mock RAG" in answer_rag:
-		logger.info("Notice: Using mock RAG. Responses are simulated for testing.")
-		return MockRAGClient()
+	if answer_rag == "Yes, i have setup the RAG":
+		rag_url = os.getenv("RAG_URL", "http://localhost:8080")
+		logger.info(f"Checking default address of RAG service {rag_url}")
+		try:
+			resp = requests.get(rag_url + "/health")
+			resp.raise_for_status()
+			rag = RAGClient(
+				base_url=rag_url,
+				session_id="default_security",
+				agent_id="default_security",
+			)
+			logger.info("Successfully connected to the RAG service in PORT 8080")
+		except Exception as e:
+			print(e)
+			logger.error("RAG hasn't been setup properly. Falling back to Mock RAG API")
+			rag = MockRAGClient(
+				session_id="default_security",
+				agent_id="default_security",
+			)
 	else:
-		rag_url = os.getenv("RAG_SERVICE_URL", "http://localhost:8080")
-		return RAGClient(rag_url)
+		rag = MockRAGClient(
+			session_id="default_security",
+			agent_id="default_security",
+		)
+	return rag
 
 
 def starter_prompt():
-	"""Main interactive prompt for agent configuration"""
+	"""Main interactive prompt for security agent configuration"""
 	choices_research_tools = [
-		"Twitter",
-		"DuckDuckGo",
-		"CoinGecko",
 		"Solana RPC",
 		"Threat Intelligence",
+		"DuckDuckGo",
 	]
 	
-	marketing_research_tools = ["Twitter", "DuckDuckGo"]
-	security_research_tools = ["Solana RPC", "Threat Intelligence", "DuckDuckGo"]
-	
-	choices_notifications = ["twitter", "blockchain_alerts", "price_alerts"]
+	choices_notifications = ["blockchain_alerts", "security_alerts"]
 
 	questions = [
 		inquirer.List(
 			name="model",
-			message="Which model do you want to use ?",
+			message="Which model do you want to use for security analysis?",
 			choices=[
-				"Mock LLM",
 				"Claude",
 				"OpenAI",
 				"OpenAI (openrouter)",
 				"Gemini (openrouter)",
 				"QWQ (openrouter)",
+				"Mock LLM",
 			],
 			default=["Claude"],
 		),
 		inquirer.Checkbox(
 			"research_tools",
-			message="Which research tools do you want to use (use space to choose) ?",
+			message="Which security research tools do you want to use (use space to choose)?",
 			choices=[service for service in choices_research_tools],
 		),
 		inquirer.Checkbox(
 			"notifications",
-			message="Which notifications do you want to use (use space to choose) (optional) ?",
+			message="Which notifications do you want to use (use space to choose) (optional)?",
 			choices=[service for service in choices_notifications],
 		),
 		inquirer.List(
-			name="agent_type",
-			message="Please choose agent type ?",
-			choices=["security", "marketing"],
-			default=["security"],
-		),
-		inquirer.List(
 			name="rag",
-			message="Have you setup the RAG API (rag-api folder) ?",
+			message="Have you setup the RAG API (rag-api folder)?",
 			choices=["No, I'm using Mock RAG for now", "Yes, i have setup the RAG"],
 		),
 	]
 	answers = inquirer.prompt(questions)
 
-	rag_client = extra_rag_questions(answers["rag"], answers["agent_type"])
+	rag_client = extra_rag_questions(answers["rag"])
 	model_name = extra_model_questions(answers["model"])
 	extra_research_tools_questions(answers["research_tools"])
 
-	sensor = extra_sensor_questions(answers["agent_type"])
+	sensor = extra_sensor_questions()
 
-	if answers["agent_type"] == "marketing":
-		fe_data = FE_DATA_MARKETING_DEFAULTS.copy()
-	elif answers["agent_type"] == "security":
-		os.environ["META_SWAP_API_URL"] = os.getenv(
-			"META_SWAP_API_URL", "http://localhost:9009"
-		)
-		fe_data = FE_DATA_SECURITY_DEFAULTS.copy()
+	# Set up security agent configuration
+	os.environ["META_SWAP_API_URL"] = os.getenv(
+		"META_SWAP_API_URL", "http://localhost:9009"
+	)
+	fe_data = FE_DATA_SECURITY_DEFAULTS.copy()
 
-	if answers["agent_type"] == "marketing":
-		fe_data["research_tools"] = [
-			x for x in answers["research_tools"] if x in marketing_research_tools
-		]
-	else:
-		fe_data["research_tools"] = [
-			x for x in answers["research_tools"] if x in security_research_tools
-		]
+	# Filter research tools to security-relevant ones
+	security_research_tools = ["Solana RPC", "Threat Intelligence", "DuckDuckGo"]
+	fe_data["research_tools"] = [
+		x for x in answers["research_tools"] if x in security_research_tools
+	]
 	
-	fe_data["prompts"] = fetch_default_prompt(fe_data, answers["agent_type"])
+	fe_data["notifications"] = answers["notifications"]
+	fe_data["prompts"] = fetch_default_prompt(fe_data, "security")
 	fe_data["model"] = model_name
 
 	or_client = (
@@ -531,38 +396,27 @@ def starter_prompt():
 		stream_fn=lambda token: print(token, end="", flush=True),
 	)
 	
-	# Run agent cycles
+	logger.info("🛡️ Starting Security Agent Framework")
+	logger.info("Monitoring Solana blockchain for wallet threats...")
+	
+	# Run security agent cycles
 	for x in range(3):
-		if answers["agent_type"] == "marketing":
-			start_marketing_agent(
-				agent_type=answers["agent_type"],
-				session_id="default_marketing",
-				agent_id="default_marketing",
-				fe_data=fe_data,
-				genner=genner,
-				db=SQLiteDB(
-					db_path=os.getenv("SQLITE_PATH", "../db/superior-agents.db")
-				),
-				rag=rag_client,
-				sensor=sensor,
-			)
-		elif answers["agent_type"] == "security":
-			start_security_agent(
-				agent_type=answers["agent_type"],
-				session_id="default_security",
-				agent_id="default_security",
-				fe_data=fe_data,
-				genner=genner,
-				db=SQLiteDB(
-					db_path=os.getenv("SQLITE_PATH", "../db/superior-agents.db")
-				),
-				rag=rag_client,
-				sensor=sensor,
-				meta_swap_api_url=os.getenv("META_SWAP_API_URL"),
-			)
+		start_security_agent(
+			agent_type="security",
+			session_id="default_security",
+			agent_id="default_security",
+			fe_data=fe_data,
+			genner=genner,
+			db=SQLiteDB(
+				db_path=os.getenv("SQLITE_PATH", "../db/superior-agents.db")
+			),
+			rag=rag_client,
+			sensor=sensor,
+			meta_swap_api_url=os.getenv("META_SWAP_API_URL"),
+		)
 		session_interval = 15
 		logger.info(
-			f"Waiting for {session_interval} seconds before starting a new cycle..."
+			f"Waiting for {session_interval} seconds before starting next security monitoring cycle..."
 		)
 		time.sleep(session_interval)
 
