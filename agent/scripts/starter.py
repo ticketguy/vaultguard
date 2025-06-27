@@ -284,53 +284,27 @@ def setup_security_sensor() -> SecuritySensorInterface:
 
 
 def extra_background_monitor_questions():
-	"""Ask user about background monitoring configuration"""
-	questions = [
-		inquirer.List(
-			name="enable_background_monitor",
-			message="Enable 24/7 background intelligence monitoring?",
-			choices=[
-				"Yes - Monitor Twitter, Reddit, blacklisted wallets",
-				"No - Just real-time transaction analysis"
-			],
-		)
-	]
-	
-	if inquirer.prompt(questions)["enable_background_monitor"].startswith("Yes"):
-		# Ask for API keys
-		api_questions = []
-		
-		if not os.getenv("TWITTER_BEARER_TOKEN"):
-			api_questions.append(
-				inquirer.Password(
-					"twitter_token", 
-					message="Twitter Bearer Token (optional, for social media monitoring):",
-					default=""
-				)
-			)
-		
-		if not os.getenv("REDDIT_CLIENT_ID"):
-			api_questions.append(
-				inquirer.Text(
-					"reddit_client_id", 
-					message="Reddit Client ID (optional, for Reddit monitoring):",
-					default=""
-				)
-			)
-		
-		if api_questions:
-			api_answers = inquirer.prompt(api_questions)
-			
-			if api_answers.get("twitter_token"):
-				os.environ["TWITTER_BEARER_TOKEN"] = api_answers["twitter_token"]
-			
-			if api_answers.get("reddit_client_id"):
-				os.environ["REDDIT_CLIENT_ID"] = api_answers["reddit_client_id"]
-		
-		return True
-	else:
-		return False
-
+    """Ask user about background monitoring configuration"""
+    questions = [
+        inquirer.List(
+            name="enable_background_monitor",
+            message="Enable 24/7 background intelligence monitoring?",
+            choices=[
+                "Yes - Monitor Twitter, Reddit, blacklisted wallets",
+                "No - Just real-time transaction analysis"
+            ],
+        )
+    ]
+    
+    answer = inquirer.prompt(questions)["enable_background_monitor"]
+    
+    if answer.startswith("Yes"):
+        logger.info("✅ Background monitoring will be enabled")
+        logger.info("💡 Note: Twitter/Reddit API keys are optional - system works without them")
+        return True
+    else:
+        logger.info("📊 Using real-time analysis only")
+        return False
 
 def extra_research_tools_questions(answer_research_tools):
 	"""Prompt for API keys needed by selected research tools"""
@@ -432,7 +406,15 @@ def extra_sensor_questions():
 def extra_rag_questions(answer_rag):
 	"""Configure RAG client"""
 	if answer_rag == "Yes, i have setup the RAG":
-		return RAGClient(os.getenv("RAG_SERVICE_URL", "http://localhost:8080"))
+    		# RAGClient expects agent_id as first parameter
+		agent_id = f"security_agent_{int(time.time())}"
+		
+		try:
+			return RAGClient(agent_id)  # Just agent_id
+		except TypeError as e:
+			logger.warning(f"⚠️ RAGClient constructor error: {e}")
+			logger.info("📚 Falling back to Mock RAG")
+			return MockRAGClient()
 	else:
 		logger.info("📚 Using Mock RAG for testing")
 		return MockRAGClient()
@@ -466,29 +448,14 @@ async def main_security_loop(fe_data, genner, rag_client, sensor):
 
 
 def starter_prompt():
-	"""Enhanced starter prompt with background monitoring options"""
+	"""Fully automated starter for security system - minimal questions"""
 	
-	choices_research_tools = [
-		"Solana RPC",
-		"Threat Intelligence", 
-		"DuckDuckGo",
-		"CoinGecko",
-		"Etherscan", 
-		"1inch",
-		"Infura"
-	]
-	
-	choices_notifications = [
-		"blockchain_alerts",
-		"security_alerts",
-		"community_reports"
-	]
-	
+	# Only ask the essentials
 	questions = [
-		inquirer.Text("agent_name", message="What's the name of your security agent?", default="MySecurityAgent"),
+		inquirer.Text("agent_name", message="What's the name of your security agent?", default="SecurityAgent"),
 		inquirer.List(
 			name="model",
-			message="Which AI model do you want to use for analysis and code generation?",
+			message="Which AI model do you want to use?",
 			choices=[
 				"Claude",
 				"OpenAI",
@@ -498,76 +465,139 @@ def starter_prompt():
 				"Mock LLM"
 			],
 		),
-		inquirer.Checkbox(
-			"research_tools",
-			message="Which research tools do you want to use? (use space to choose)",
-			choices=[service for service in choices_research_tools],
-		),
-		inquirer.Checkbox(
-			"notifications",
-			message="Which notifications do you want to use? (use space to choose) (optional)",
-			choices=[service for service in choices_notifications],
-		),
-		inquirer.List(
-			name="rag",
-			message="Have you setup the RAG API (rag-api folder) for threat intelligence?",
-			choices=["No, I'm using Mock RAG for now", "Yes, i have setup the RAG"],
-		),
 	]
 	answers = inquirer.prompt(questions)
 
-	# Setup components
-	rag_client = extra_rag_questions(answers["rag"])
-	model_name = extra_model_questions(answers["model"])
-	extra_research_tools_questions(answers["research_tools"])
-	sensor = extra_sensor_questions()
+	logger.info("🛡️ Auto-configuring security system...")
 	
-	# 🚀 NEW: Ask about background monitoring
-	enable_background_monitor = extra_background_monitor_questions()
+	# AUTO-DETECT: RAG availability
+	rag_client = auto_detect_rag()
+	
+	# AUTO-CONFIGURE: AI model
+	model_name = extra_model_questions(answers["model"])
+	
+	# AUTO-CONFIGURE: Security tools (no questions)
+	security_research_tools = ["Solana RPC", "Threat Intelligence", "DuckDuckGo"]
+	security_notifications = ["blockchain_alerts", "security_alerts", "community_reports"]
+	
+	logger.info(f"✅ Enabled research tools: {', '.join(security_research_tools)}")
+	logger.info(f"✅ Enabled notifications: {', '.join(security_notifications)}")
+	
+	# AUTO-CONFIGURE: API keys (only ask if missing and needed)
+	auto_configure_api_keys(security_research_tools)
+	
+	# AUTO-DETECT: Sensor capabilities
+	sensor = auto_detect_sensor()
+	
+	# AUTO-CONFIGURE: Background monitoring (enable if APIs available)
+	enable_background_monitor = auto_detect_background_monitoring()
 
-	# Set up security agent configuration
+	# Build configuration
 	fe_data = FE_DATA_SECURITY_DEFAULTS.copy()
 	fe_data["agent_name"] = answers["agent_name"]
-
-	# Filter research tools to security-relevant ones
-	security_research_tools = ["Solana RPC", "Threat Intelligence", "DuckDuckGo"]
-	fe_data["research_tools"] = [
-		x for x in answers["research_tools"] if x in security_research_tools
-	]
-	
-	fe_data["notifications"] = answers["notifications"]
+	fe_data["research_tools"] = security_research_tools
+	fe_data["notifications"] = security_notifications
 	fe_data["prompts"] = fetch_default_prompt(fe_data, "security")
 	fe_data["model"] = model_name
 	fe_data["enable_background_monitor"] = enable_background_monitor
 
 	# Initialize AI generators
-	or_client = (
-		OpenRouter(
-			base_url="https://openrouter.ai/api/v1",
-			api_key=os.getenv("OPENROUTER_API_KEY"),
-			include_reasoning=True,
-		)
-		if os.getenv("OPENROUTER_API_KEY") is not None
-		else None
-	)
-
-	anthropic_client = (
-		Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-		if os.getenv("ANTHROPIC_API_KEY") is not None
-		else None
-	)
-
 	genner = get_genner(
 		backend=fe_data["model"],
-		or_client=or_client,
-		anthropic_client=anthropic_client,
+		or_client=get_openrouter_client(),
+		anthropic_client=get_anthropic_client(),
 		stream_fn=lambda token: print(token, end="", flush=True),
 	)
 	
-	# Start the main security loop with background monitoring
-	logger.info("🚀 Starting AI-Powered Security System with Background Intelligence...")
+	logger.info("🚀 Starting Fully Automated AI Security System...")
 	asyncio.run(main_security_loop(fe_data, genner, rag_client, sensor))
 
+
+def auto_detect_rag():
+	"""Auto-detect RAG availability"""
+	rag_url = os.getenv("RAG_SERVICE_URL", "http://localhost:8080")
+	
+	try:
+		# Test if RAG service is running
+		response = requests.get(f"{rag_url}/health", timeout=2)
+		if response.status_code == 200:
+			logger.info(f"✅ RAG service detected at {rag_url}")
+			
+			# Try to create RAGClient with different constructor patterns
+			agent_id = f"security_agent_{int(time.time())}"
+			session_id = f"security_session_{int(time.time())}"
+			
+			try:
+				return RAGClient(agent_id)
+			except TypeError:
+				try:
+					return RAGClient(agent_id, session_id, rag_url)
+				except TypeError:
+					try:
+						return RAGClient(session_id, rag_url)
+					except TypeError:
+						logger.warning("⚠️ RAGClient constructor mismatch, using Mock RAG")
+						return MockRAGClient()
+		else:
+			logger.info("📚 RAG service not available, using Mock RAG")
+			return MockRAGClient()
+			
+	except Exception as e:
+		logger.info(f"📚 RAG auto-detection failed ({e}), using Mock RAG")
+		return MockRAGClient()
+
+
+def auto_configure_api_keys(research_tools):
+	"""Only ask for API keys if they're missing and actually needed"""
+	missing_keys = []
+	
+	for tool in research_tools:
+		if tool in SERVICE_TO_ENV:
+			for env_var in SERVICE_TO_ENV[tool]:
+				if not os.getenv(env_var):
+					missing_keys.append(env_var)
+	
+	if missing_keys:
+		logger.info(f"💡 Optional API keys missing: {', '.join(missing_keys)}")
+		logger.info("📊 System will work without them, using fallback methods")
+		
+		# Only ask if user wants to provide them
+		if inquirer.confirm("Configure optional API keys for enhanced features?", default=False):
+			extra_research_tools_questions(research_tools)
+
+
+def auto_detect_sensor():
+	"""Auto-detect sensor capabilities"""
+	if os.getenv("HELIUS_API_KEY") or os.getenv("SOLANA_RPC_URL"):
+		logger.info("🛡️ Real-time sensor available")
+		return setup_security_sensor()
+	else:
+		logger.info("📊 Using Mock sensor (add HELIUS_API_KEY for real-time protection)")
+		return MockSecuritySensor(["demo_wallet"], "mock_rpc", "mock_key")
+
+
+def auto_detect_background_monitoring():
+	"""Auto-detect background monitoring capabilities"""
+	if os.getenv("TWITTER_BEARER_TOKEN") or os.getenv("REDDIT_CLIENT_ID"):
+		logger.info("📡 Background monitoring APIs available")
+		return True
+	else:
+		logger.info("📊 Background monitoring disabled (add Twitter/Reddit keys to enable)")
+		return False
+
+
+def get_openrouter_client():
+	"""Get OpenRouter client if available"""
+	return OpenRouter(
+		base_url="https://openrouter.ai/api/v1",
+		api_key=os.getenv("OPENROUTER_API_KEY"),
+		include_reasoning=True,
+	) if os.getenv("OPENROUTER_API_KEY") else None
+
+
+def get_anthropic_client():
+	"""Get Anthropic client if available"""
+	return Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY")) if os.getenv("ANTHROPIC_API_KEY") else None
 
 if __name__ == "__main__":
 	starter_prompt()

@@ -19,6 +19,156 @@ from src.types import ChatHistory, Message
 from src.db import DBInterface
 
 
+class SecurityPromptGenerator:
+    """Generates prompts for security analysis using chain of thought reasoning"""
+    
+    def __init__(self, prompts: Dict[str, str]):
+        if not prompts:
+            prompts = self.get_default_prompts()
+        self._validate_prompts(prompts)
+        self.prompts = prompts
+
+    def _validate_prompts(self, prompts: Dict[str, str]):
+        """Ensure all required prompts are present"""
+        required_prompts = [
+            'system', 'analysis_code_prompt', 'analysis_code_on_first_prompt',
+            'strategy_prompt', 'quarantine_code_prompt', 'regen_code_prompt'
+        ]
+        for prompt in required_prompts:
+            if prompt not in prompts:
+                prompts[prompt] = f"Default {prompt} prompt for security analysis"
+
+    def get_default_prompts(self) -> Dict[str, str]:
+        """Get default security prompts"""
+        return {
+            'system': dedent("""
+                You are an AI security analyst for Web3 wallets specializing in {role}.
+                Network: {network}
+                Time frame: {time}
+                Current security metric: {metric_name} = {metric_state}
+
+                Generate custom Python analysis code for each security threat based on available intelligence.
+                Focus on protecting users from scams, exploits, and malicious contracts.
+                Provide clear explanations that users can understand.
+            """).strip(),
+            
+            'analysis_code_prompt': dedent("""
+                Generate Python security analysis code based on threat intelligence.
+                
+                Notifications: {notifications_str}
+                Available APIs: {apis_str}
+                Previous Analysis: {prev_analysis}
+                RAG Intelligence: {rag_summary}
+                
+                Generate code that analyzes current security threats and provides protection.
+                Focus on real Solana blockchain analysis using available APIs.
+                Return detailed threat analysis with risk scores and evidence.
+            """).strip(),
+            
+            'analysis_code_on_first_prompt': dedent("""
+                Generate initial security analysis code for blockchain monitoring.
+                
+                Available APIs: {apis_str}
+                Network: {network}
+                
+                Create comprehensive security monitoring code that:
+                1. Analyzes wallet transactions for threats
+                2. Detects scam tokens and contracts
+                3. Identifies MEV attacks and exploits
+                4. Returns detailed security assessment
+                
+                Use the available APIs to gather real blockchain data.
+            """).strip(),
+            
+            'strategy_prompt': dedent("""
+                Generate security strategy based on threat analysis results.
+                
+                Analysis Results: {analysis_results}
+                Available APIs: {apis_str}
+                Current Security State: {before_metric_state}
+                Network: {network}
+                Time Frame: {time}
+                
+                Create a comprehensive security strategy that:
+                1. Addresses identified threats
+                2. Implements protective measures
+                3. Provides user recommendations
+                4. Updates security protocols
+                
+                Focus on actionable security improvements.
+            """).strip(),
+            
+            'quarantine_code_prompt': dedent("""
+                Generate quarantine management code for security threats.
+                
+                Strategy: {strategy_output}
+                Available APIs: {apis_str}
+                Current State: {before_metric_state}
+                
+                Create code that:
+                1. Implements quarantine decisions
+                2. Manages threat isolation
+                3. Handles user approvals
+                4. Updates security database
+                
+                Ensure safe handling of suspicious items.
+            """).strip(),
+            
+            'regen_code_prompt': dedent("""
+                Fix errors in security code while maintaining threat detection logic.
+                
+                Errors: {errors}
+                Previous code: {previous_code}
+                
+                Generate corrected code that fixes the errors while preserving security effectiveness.
+                Include proper error handling and maintain chain of thought reasoning.
+            """).strip()
+        }
+
+    def generate_system_prompt(self, role: str, time: str, metric_name: str, 
+                              metric_state: str, network: str) -> str:
+        """Generate system prompt with security context"""
+        return self.prompts['system'].format(
+            role=role,
+            time=time,
+            metric_name=metric_name,
+            metric_state=metric_state,
+            network=network
+        )
+
+    def generate_analysis_code_prompt(self, notifications_str: str, apis_str: str, 
+                                    prev_analysis: str, rag_summary: str,
+                                    before_metric_state: str, after_metric_state: str) -> str:
+        """Generate prompt for security analysis code"""
+        return self.prompts['analysis_code_prompt'].format(
+            notifications_str=notifications_str,
+            apis_str=apis_str,
+            prev_analysis=prev_analysis,
+            rag_summary=rag_summary,
+            before_metric_state=before_metric_state,
+            after_metric_state=after_metric_state
+        )
+
+    def generate_strategy_prompt(self, analysis_results: str, apis_str: str,
+                               before_metric_state: str, network: str, time: str) -> str:
+        """Generate prompt for security strategy"""
+        return self.prompts['strategy_prompt'].format(
+            analysis_results=analysis_results,
+            apis_str=apis_str,
+            before_metric_state=before_metric_state,
+            network=network,
+            time=time
+        )
+
+    def generate_quarantine_code_prompt(self, strategy_output: str, apis_str: str,
+                                      before_metric_state: str) -> str:
+        """Generate prompt for quarantine code"""
+        return self.prompts['quarantine_code_prompt'].format(
+            strategy_output=strategy_output,
+            apis_str=apis_str,
+            before_metric_state=before_metric_state
+        )
+
 class SecurityAgent:
     """
     AI-powered SecurityAgent that generates custom analysis code for every threat.

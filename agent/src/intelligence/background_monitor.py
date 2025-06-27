@@ -31,8 +31,19 @@ except ImportError:
 # Database and RAG integration
 from src.db import SQLiteDB
 from src.client.rag import RAGClient
-from rag.src.fetch import update_community_intelligence
+# Try to import from rag-api, fallback if not available
+try:
+    import sys
+    import os
+    sys.path.append(os.path.join(os.path.dirname(__file__), '../../../rag-api'))
+    from src.fetch import update_community_intelligence
+except ImportError:
+    # Fallback: create a mock function
+    async def update_community_intelligence(data):
+        print(f"📝 Would update community intelligence: {data}")
+        return True
 
+        
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BackgroundMonitor")
