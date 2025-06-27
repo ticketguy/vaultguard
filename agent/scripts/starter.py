@@ -514,37 +514,44 @@ def starter_prompt():
 
 
 def auto_detect_rag():
-	"""Auto-detect RAG availability"""
-	rag_url = os.getenv("RAG_SERVICE_URL", "http://localhost:8080")
-	
-	try:
-		# Test if RAG service is running
-		response = requests.get(f"{rag_url}/health", timeout=2)
-		if response.status_code == 200:
-			logger.info(f"✅ RAG service detected at {rag_url}")
-			
-			# Try to create RAGClient with different constructor patterns
-			agent_id = f"security_agent_{int(time.time())}"
-			session_id = f"security_session_{int(time.time())}"
-			
-			try:
-				return RAGClient(agent_id)
-			except TypeError:
-				try:
-					return RAGClient(agent_id, session_id, rag_url)
-				except TypeError:
-					try:
-						return RAGClient(session_id, rag_url)
-					except TypeError:
-						logger.warning("⚠️ RAGClient constructor mismatch, using Mock RAG")
-						return MockRAGClient()
-		else:
-			logger.info("📚 RAG service not available, using Mock RAG")
-			return MockRAGClient()
-			
-	except Exception as e:
-		logger.info(f"📚 RAG auto-detection failed ({e}), using Mock RAG")
-		return MockRAGClient()
+    """Auto-detect RAG availability"""
+    rag_url = os.getenv("RAG_SERVICE_URL", "http://localhost:8080")
+
+    try:
+        # Test if RAG service is running
+        response = requests.get(f"{rag_url}/health", timeout=2)
+        if response.status_code == 200:
+            logger.info(f"✅ RAG service detected at {rag_url}")
+
+            # Try to create RAGClient with different constructor patterns
+            agent_id = f"security_agent_{int(time.time())}"
+            session_id = f"security_session_{int(time.time())}"
+
+            try:
+                return RAGClient(agent_id)
+            except TypeError:
+                try:
+                    return RAGClient(agent_id, session_id, rag_url)
+                except TypeError:
+                    try:
+                        return RAGClient(session_id, rag_url)
+                    except TypeError:
+                        logger.warning("⚠️ RAGClient constructor mismatch, using Mock RAG")
+                        # Fix MockRAGClient constructor
+                        return MockRAGClient(agent_id, session_id)
+        else:
+            logger.info("📚 RAG service not available, using Mock RAG")
+            # Fix MockRAGClient constructor
+            agent_id = f"security_agent_{int(time.time())}"
+            session_id = f"security_session_{int(time.time())}"
+            return MockRAGClient(agent_id, session_id)
+
+    except Exception as e:
+        logger.info(f"📚 RAG auto-detection failed ({e}), using Mock RAG")
+        # Fix MockRAGClient constructor
+        agent_id = f"security_agent_{int(time.time())}"
+        session_id = f"security_session_{int(time.time())}"
+        return MockRAGClient(agent_id, session_id)
 
 
 def auto_configure_api_keys(research_tools):
