@@ -51,7 +51,7 @@ FE_DATA_SECURITY_DEFAULTS = {
 }
 
 
-def start_security_agent(
+async def start_security_agent(
 	agent_type: str,
 	session_id: str,
 	agent_id: str,
@@ -63,7 +63,7 @@ def start_security_agent(
 	meta_swap_api_url: str,
 	stream_fn: Callable[[str], None] = lambda x: print(x, flush=True, end=""),
 ):
-	"""Start security agent with blockchain threat monitoring"""
+	"""Start security agent with blockchain threat monitoring and real-time protection"""
 	role = fe_data["role"]
 	network = fe_data["network"]
 	services_used = fe_data["research_tools"]
@@ -91,6 +91,7 @@ def start_security_agent(
 
 	rag.save_result_batch_v4(previous_strategies)
 
+	# Create SecurityAgent
 	agent = SecurityAgent(
 		agent_id=agent_id,
 		sensor=sensor,
@@ -100,6 +101,20 @@ def start_security_agent(
 		db=db,
 		rag=rag,
 	)
+
+	# 🚀 NEW: Connect SecuritySensor to SecurityAgent for real-time quarantine decisions
+	if hasattr(sensor, 'set_security_agent'):
+		sensor.set_security_agent(agent)
+		logger.info("🔗 Connected SecuritySensor to SecurityAgent for quarantine decisions")
+	
+	# 🚀 NEW: Start real-time incoming transaction monitoring
+	if hasattr(sensor, 'start_incoming_monitor'):
+		try:
+			await sensor.start_incoming_monitor()
+			logger.info("🛡️ Real-time monitoring started - protecting against threats!")
+		except Exception as e:
+			logger.warning(f"⚠️ Could not start real-time monitoring: {e}")
+			logger.info("📊 Continuing with periodic analysis only")
 
 	flow_func = partial(
 		security_assisted_flow,
@@ -115,7 +130,7 @@ def start_security_agent(
 		summarizer=summarizer,
 	)
 
-	run_cycle(
+	await run_cycle(
 		agent,
 		notif_sources,
 		flow_func,
@@ -126,7 +141,7 @@ def start_security_agent(
 	)
 
 
-def run_cycle(
+async def run_cycle(
 	agent: SecurityAgent,
 	notif_sources: list[str],
 	flow: Callable[[StrategyData | None, str | None], None],
@@ -153,7 +168,7 @@ def run_cycle(
 
 
 def setup_security_sensor() -> SecuritySensorInterface:
-	"""Initialize Solana blockchain security sensor"""
+	"""Initialize Solana blockchain security sensor with real-time monitoring capability"""
 	HELIUS_API_KEY = os.environ.get("HELIUS_API_KEY")
 	SOLANA_RPC_URL = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
 	
@@ -171,6 +186,10 @@ def setup_security_sensor() -> SecuritySensorInterface:
 			"7xKs1aTF7YbL8C9s3mZNbGKPFXCWuBvf9Ss623VQ5DA",
 			"9mNp2bK8fG3cCd4sVhMnBkLpQrTt5RwXyZ7nE8hS1kL"
 		]
+	
+	logger.info(f"🛡️ Setting up SecuritySensor for {len(monitored_wallets)} wallets:")
+	for wallet in monitored_wallets:
+		logger.info(f"   📡 Monitoring: {wallet[:8]}...{wallet[-8:]}")
 	
 	sensor = SecuritySensor(
 		wallet_addresses=monitored_wallets,
@@ -241,20 +260,20 @@ def extra_model_questions(answer_model):
 
 
 def extra_sensor_questions():
-	"""Configure security sensor for Solana monitoring"""
+	"""Configure security sensor for Solana monitoring with real-time protection"""
 	sensor_api_keys = ["HELIUS_API_KEY", "SOLANA_RPC_URL"]
 	question_security_sensor = [
 		inquirer.List(
 			name="sensor",
-			message=f"Do you have these API keys {', '.join(sensor_api_keys)} ?",
+			message=f"Do you have these API keys {', '.join(sensor_api_keys)} for real-time monitoring?",
 			choices=[
 				"No, I'm using Mock Security Sensor for now",
-				"Yes, i have these keys",
+				"Yes, i have these keys for real-time protection",
 			],
 		)
 	]
 	answer_security_sensor = inquirer.prompt(question_security_sensor)
-	if answer_security_sensor["sensor"] == "Yes, i have these keys":
+	if answer_security_sensor["sensor"] == "Yes, i have these keys for real-time protection":
 		sensor_api_keys = [x for x in sensor_api_keys if not os.getenv(x)]
 		question_sensor_api_keys = [
 			inquirer.Text(
@@ -270,12 +289,14 @@ def extra_sensor_questions():
 					os.environ[x] = answer_sensor_api_keys[x]
 		
 		sensor = setup_security_sensor()
+		logger.info("🚀 Real-time SecuritySensor configured - incoming transactions will be monitored!")
 	else:
 		sensor = MockSecuritySensor(
 			wallet_addresses=["mock_wallet_1", "mock_wallet_2"],
 			solana_rpc_url="mock://solana-rpc",
 			helius_api_key="mock_helius_key"
 		)
+		logger.info("📊 Mock SecuritySensor configured - periodic analysis only")
 
 	return sensor
 
@@ -307,6 +328,54 @@ def extra_rag_questions(answer_rag):
 			agent_id="default_security",
 		)
 	return rag
+
+
+async def stop_monitoring_gracefully(sensor):
+	"""Gracefully stop real-time monitoring"""
+	if hasattr(sensor, 'stop_monitoring'):
+		sensor.stop_monitoring()
+		logger.info("🛑 Real-time monitoring stopped gracefully")
+
+
+async def main_security_loop(fe_data, genner, rag_client, sensor):
+	"""Main async loop for security agent with real-time monitoring"""
+	logger.info("🛡️ Starting Security Agent Framework with Real-Time Protection")
+	logger.info("Monitoring Solana blockchain for wallet threats...")
+	
+	try:
+		# Run security agent cycles with real-time monitoring
+		for cycle in range(3):
+			logger.info(f"📊 Starting security analysis cycle {cycle + 1}/3")
+			
+			await start_security_agent(
+				agent_type="security",
+				session_id="default_security",
+				agent_id="default_security",
+				fe_data=fe_data,
+				genner=genner,
+				db=SQLiteDB(
+					db_path=os.getenv("SQLITE_PATH", "../db/superior-agents.db")
+				),
+				rag=rag_client,
+				sensor=sensor,
+				meta_swap_api_url=os.getenv("META_SWAP_API_URL"),
+			)
+			
+			session_interval = 15
+			if cycle < 2:  # Don't wait after the last cycle
+				logger.info(
+					f"⏱️ Waiting {session_interval} seconds before next cycle (real-time monitoring continues)..."
+				)
+				await asyncio.sleep(session_interval)
+	
+	except KeyboardInterrupt:
+		logger.info("🛑 Received shutdown signal...")
+	except Exception as e:
+		logger.error(f"❌ Error in security agent: {e}")
+	finally:
+		# Gracefully stop monitoring
+		await stop_monitoring_gracefully(sensor)
+		logger.info("✅ Security Agent Framework stopped")
 
 
 def starter_prompt():
@@ -345,7 +414,7 @@ def starter_prompt():
 		),
 		inquirer.List(
 			name="rag",
-			message="Have you setup the RAG API (rag-api folder)?",
+			message="Have you setup the RAG API (rag-api folder) for threat intelligence?",
 			choices=["No, I'm using Mock RAG for now", "Yes, i have setup the RAG"],
 		),
 	]
@@ -396,29 +465,8 @@ def starter_prompt():
 		stream_fn=lambda token: print(token, end="", flush=True),
 	)
 	
-	logger.info("🛡️ Starting Security Agent Framework")
-	logger.info("Monitoring Solana blockchain for wallet threats...")
-	
-	# Run security agent cycles
-	for x in range(3):
-		start_security_agent(
-			agent_type="security",
-			session_id="default_security",
-			agent_id="default_security",
-			fe_data=fe_data,
-			genner=genner,
-			db=SQLiteDB(
-				db_path=os.getenv("SQLITE_PATH", "../db/superior-agents.db")
-			),
-			rag=rag_client,
-			sensor=sensor,
-			meta_swap_api_url=os.getenv("META_SWAP_API_URL"),
-		)
-		session_interval = 15
-		logger.info(
-			f"Waiting for {session_interval} seconds before starting next security monitoring cycle..."
-		)
-		time.sleep(session_interval)
+	# 🚀 NEW: Run the main async loop with real-time monitoring
+	asyncio.run(main_security_loop(fe_data, genner, rag_client, sensor))
 
 
 if __name__ == "__main__":

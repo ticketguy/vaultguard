@@ -1,445 +1,533 @@
 """
-Dust Attack Detection for Solana
-Detects small-value transactions used for wallet tracking and phishing
-Adapted to work with SecuritySensor framework
+Enhanced Community Threat Intelligence Database
+Combines threat detection with legitimate project verification
+Integrates with RAG system for shared intelligence
 """
 
-import asyncio
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from datetime import datetime, timedelta
+import json
 
 
-class DustDetector:
+class EnhancedCommunityDatabase:
     """
-    Detect dust attacks on Solana blockchain.
-    Dust attacks use tiny token amounts to track wallets and setup phishing campaigns.
+    Enhanced community database that maintains both:
+    1. Threat intelligence (scammers, malicious contracts)
+    2. Legitimate project verification (real airdrops, verified tokens)
     """
     
     def __init__(self):
-        # Solana-specific dust attack patterns and thresholds
-        self.dust_patterns = {
-            'solana_dust_thresholds': {
-                'tiny_dust': 0.00001,         # Extremely small amounts for tracking
-                'small_dust': 0.0001,         # Small dust amounts
-                'medium_dust': 0.001,         # Medium dust amounts
-                'tracking_threshold': 0.01    # Above this not considered dust
+        # Legitimate Solana projects database
+        self.legitimate_projects = {
+            # DEX and Trading Projects
+            'jupiter': {
+                'official_addresses': [
+                    'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',
+                    'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4'
+                ],
+                'token_symbols': ['JUP'],
+                'token_names': ['jupiter', 'jup token'],
+                'official_websites': ['jup.ag', 'jupiter.ag'],
+                'social_handles': ['@JupiterExchange'],
+                'airdrop_history': ['2024-01-31'],  # Known airdrop dates
+                'reputation_score': 1.0,
+                'verification_level': 'fully_verified',
+                'category': 'dex',
+                'description': 'Leading Solana DEX aggregator'
             },
-            'suspicious_patterns': {
-                'mass_sender_threshold': 100,     # Sent to 100+ different wallets
-                'timing_window_hours': 24,        # Time window for mass sending
-                'identical_amounts': True,        # Same amount to multiple recipients
-                'new_wallet_targeting': 0.8       # Targeting 80%+ new wallets
+            'orca': {
+                'official_addresses': [
+                    'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE',
+                    'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc'
+                ],
+                'token_symbols': ['ORCA'],
+                'token_names': ['orca', 'orca token'],
+                'official_websites': ['orca.so'],
+                'social_handles': ['@orca_so'],
+                'airdrop_history': ['2021-08-18'],
+                'reputation_score': 0.95,
+                'verification_level': 'fully_verified',
+                'category': 'dex',
+                'description': 'User-friendly DEX on Solana'
             },
-            'known_dust_programs': [
-                'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',  # SPL Token Program
-                '11111111111111111111111111111111',             # System Program
-                'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'   # Associated Token Program
-            ],
-            'phishing_keywords': [
-                'airdrop', 'claim', 'reward', 'free', 'bonus', 
-                'gift', 'winner', 'prize', 'lucky', 'congratulations'
-            ]
+            'raydium': {
+                'official_addresses': [
+                    '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
+                    'RayZuc5yydRzDPPJDKhJ3eqJGnXdLSqgmJKwu73ZYzh'
+                ],
+                'token_symbols': ['RAY'],
+                'token_names': ['raydium', 'ray token'],
+                'official_websites': ['raydium.io'],
+                'social_handles': ['@RaydiumProtocol'],
+                'airdrop_history': ['2021-02-21'],
+                'reputation_score': 0.95,
+                'verification_level': 'fully_verified',
+                'category': 'dex',
+                'description': 'Automated market maker on Solana'
+            },
+            
+            # Lending and DeFi
+            'mango_markets': {
+                'official_addresses': [
+                    'MangoCzJ36AjZyKwVj3VnYU4GTonjfVEnJmvvWaxLac',
+                    'mv3ekLzLbnVPNxjSKvqBpU3ZeZXPQdEC3bp5MDEBG68'
+                ],
+                'token_symbols': ['MNGO'],
+                'token_names': ['mango', 'mango markets'],
+                'official_websites': ['mango.markets'],
+                'social_handles': ['@mangomarkets'],
+                'airdrop_history': ['2021-09-14'],
+                'reputation_score': 0.9,
+                'verification_level': 'verified',
+                'category': 'defi',
+                'description': 'Decentralized trading platform'
+            },
+            'solend': {
+                'official_addresses': [
+                    'So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo',
+                    'SLNDpmoWTVADgEdndyvWzroNL7zSi1dF9PC3xHGtPwp'
+                ],
+                'token_symbols': ['SLND'],
+                'token_names': ['solend'],
+                'official_websites': ['solend.fi'],
+                'social_handles': ['@solendprotocol'],
+                'airdrop_history': ['2022-01-12'],
+                'reputation_score': 0.9,
+                'verification_level': 'verified',
+                'category': 'defi',
+                'description': 'Algorithmic lending protocol'
+            },
+            
+            # Infrastructure and Core
+            'solana_foundation': {
+                'official_addresses': [
+                    'So11111111111111111111111111111111111111112'  # Wrapped SOL
+                ],
+                'token_symbols': ['SOL', 'WSOL'],
+                'token_names': ['solana', 'wrapped solana'],
+                'official_websites': ['solana.com', 'solana.org'],
+                'social_handles': ['@solana'],
+                'airdrop_history': [],  # No public airdrops
+                'reputation_score': 1.0,
+                'verification_level': 'fully_verified',
+                'category': 'infrastructure',
+                'description': 'Solana blockchain native token'
+            },
+            'pyth_network': {
+                'official_addresses': [
+                    'FsJ3A3u2vn5cTVofAjvy6y5kwABJAqYWpe4975bi2epH',
+                    'PythUpgradeableLoaderState1111111111111111'
+                ],
+                'token_symbols': ['PYTH'],
+                'token_names': ['pyth', 'pyth network'],
+                'official_websites': ['pyth.network'],
+                'social_handles': ['@PythNetwork'],
+                'airdrop_history': ['2023-11-20'],
+                'reputation_score': 0.95,
+                'verification_level': 'fully_verified',
+                'category': 'infrastructure',
+                'description': 'Oracle network providing real-time data'
+            },
+            
+            # Gaming and NFTs
+            'magic_eden': {
+                'official_addresses': [
+                    'MEisE1HzehtrDpAAT8PnLHjpSSkRYakotTuJRPjTpo8',
+                    'M2mx93ekt1fmXSVkTrUL9xVFHkmME8HTUi5Cyc5aF7K'
+                ],
+                'token_symbols': ['ME'],
+                'token_names': ['magic eden'],
+                'official_websites': ['magiceden.io'],
+                'social_handles': ['@MagicEden'],
+                'airdrop_history': ['2024-12-10'],
+                'reputation_score': 0.9,
+                'verification_level': 'verified',
+                'category': 'nft',
+                'description': 'Leading Solana NFT marketplace'
+            }
         }
-    
-    async def analyze_dust_attack(self, transaction_data: Dict) -> Dict:
+        
+        # Known malicious patterns and addresses
+        self.threat_database = {
+            'known_scammer_addresses': {
+                # Example malicious addresses (replace with real data)
+                '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM': {
+                    'threat_type': 'dust_attacker',
+                    'first_reported': '2024-01-15',
+                    'report_count': 47,
+                    'description': 'Mass dust attack sender targeting new wallets',
+                    'evidence': ['identical_amounts', 'mass_distribution', 'fake_tokens']
+                },
+                'DeadBeefCafeBabe1111111111111111111111111': {
+                    'threat_type': 'drain_contract',
+                    'first_reported': '2024-02-01',
+                    'report_count': 23,
+                    'description': 'Malicious contract attempting wallet drains',
+                    'evidence': ['unlimited_approvals', 'hidden_functions', 'fake_metadata']
+                }
+            },
+            'malicious_token_patterns': {
+                'fake_token_indicators': [
+                    'FAKE_USDC', 'ETHEREUM_2.0', 'FREE_SOL', 'BONUS_BTC',
+                    'CLAIM_NOW', 'LIMITED_AIRDROP', 'EXCLUSIVE_TOKEN'
+                ],
+                'scam_keywords': [
+                    'winner', 'congratulations', 'urgent', 'limited',
+                    'exclusive', 'free', 'bonus', 'claim now'
+                ],
+                'suspicious_address_patterns': [
+                    'dead', '1111', '0000', 'beef', 'fade', 'cafe'
+                ]
+            },
+            'community_reports': {
+                # User-reported threats with validation
+                'pending_validation': [],
+                'validated_threats': [],
+                'false_positives': []
+            }
+        }
+        
+        # Legitimacy verification criteria
+        self.verification_criteria = {
+            'fully_verified': {
+                'required_score': 0.9,
+                'criteria': [
+                    'official_website_verified',
+                    'social_media_verified',
+                    'team_doxxed',
+                    'audit_completed',
+                    'community_recognition'
+                ]
+            },
+            'verified': {
+                'required_score': 0.7,
+                'criteria': [
+                    'official_website',
+                    'social_media_presence',
+                    'active_development',
+                    'community_support'
+                ]
+            },
+            'community_approved': {
+                'required_score': 0.5,
+                'criteria': [
+                    'positive_community_sentiment',
+                    'transparent_tokenomics',
+                    'no_red_flags'
+                ]
+            }
+        }
+
+    def verify_project_legitimacy(self, address: str, token_symbol: str, token_name: str) -> Dict:
         """
-        Analyze transaction for dust attack patterns and tracking attempts.
-        Returns comprehensive analysis compatible with SecuritySensor framework.
+        Verify if a project/token is legitimate based on community database
         """
-        # Initialize analysis result structure for framework compatibility
-        dust_analysis = {
-            'is_dust_attack': False,           # Framework expects this field
-            'dust_risk_score': 0.0,
-            'dust_type': 'none',
-            'dust_indicators': [],
-            'sender_analysis': {},
-            'recommended_action': 'none',
-            'threats_found': 0,                # SecuritySensor expects this field
-            'analysis': "",                    # SecuritySensor expects analysis description
-            'user_warnings': [],               # User-friendly warnings
-            'technical_details': {}            # Detailed technical analysis
+        verification_result = {
+            'is_legitimate': False,
+            'verification_level': 'unverified',
+            'project_info': None,
+            'legitimacy_score': 0.0,
+            'verification_evidence': []
         }
         
-        try:
-            # Extract transaction details for analysis
-            amount = float(transaction_data.get('value', 0))
-            from_address = transaction_data.get('from_address', '')
-            to_address = transaction_data.get('to_address', '')
-            token_name = transaction_data.get('token_name', '').lower()
+        # Check against known legitimate projects
+        for project_id, project_data in self.legitimate_projects.items():
+            # Check by address
+            if address in project_data['official_addresses']:
+                verification_result.update({
+                    'is_legitimate': True,
+                    'verification_level': project_data['verification_level'],
+                    'project_info': project_data,
+                    'legitimacy_score': project_data['reputation_score'],
+                    'verification_evidence': ['official_address_match', f'verified_as_{project_id}']
+                })
+                return verification_result
             
-            # 1. Classify dust amount level
-            dust_classification = self._classify_dust_amount(amount)
-            dust_analysis['technical_details']['dust_classification'] = dust_classification
+            # Check by token symbol
+            if token_symbol.upper() in project_data['token_symbols']:
+                verification_result.update({
+                    'is_legitimate': True,
+                    'verification_level': project_data['verification_level'],
+                    'project_info': project_data,
+                    'legitimacy_score': project_data['reputation_score'] * 0.9,  # Slightly lower for symbol match
+                    'verification_evidence': ['token_symbol_match', f'verified_as_{project_id}']
+                })
+                return verification_result
             
-            if dust_classification['is_dust']:
-                dust_analysis['dust_type'] = dust_classification['dust_level']
-                dust_analysis['dust_indicators'].append(f"dust_amount_{dust_classification['dust_level']}")
-                
-                # 2. Analyze sender behavior patterns
-                sender_analysis = await self._analyze_sender_behavior(transaction_data)
-                dust_analysis['sender_analysis'] = sender_analysis
-                dust_analysis['technical_details']['sender_analysis'] = sender_analysis
-                
-                # 3. Check for mass distribution patterns
-                mass_distribution = await self._check_mass_distribution(transaction_data)
-                dust_analysis['technical_details']['mass_distribution'] = mass_distribution
-                if mass_distribution['is_mass_sender']:
-                    dust_analysis['dust_indicators'].extend(mass_distribution['indicators'])
-                
-                # 4. Check for tracking and phishing patterns
-                tracking_patterns = await self._detect_tracking_patterns(transaction_data)
-                dust_analysis['technical_details']['tracking_patterns'] = tracking_patterns
-                if tracking_patterns['is_tracking']:
-                    dust_analysis['dust_indicators'].extend(tracking_patterns['indicators'])
-                
-                # 5. Check for phishing token patterns
-                phishing_analysis = await self._analyze_phishing_patterns(transaction_data)
-                dust_analysis['technical_details']['phishing_analysis'] = phishing_analysis
-                if phishing_analysis['is_phishing_attempt']:
-                    dust_analysis['dust_indicators'].extend(phishing_analysis['indicators'])
-                
-                # 6. Calculate overall dust risk score
-                dust_analysis['dust_risk_score'] = await self._calculate_dust_risk(
-                    dust_classification, sender_analysis, mass_distribution, 
-                    tracking_patterns, phishing_analysis
-                )
-                
-                # 7. Determine if this constitutes a dust attack
-                dust_analysis['is_dust_attack'] = dust_analysis['dust_risk_score'] > 0.6
-                
-                # 8. Count threats found for SecuritySensor
-                if dust_analysis['is_dust_attack']:
-                    dust_analysis['threats_found'] = 1
-                
-                # 9. Generate user warnings and recommendations
-                dust_analysis['user_warnings'] = await self._generate_dust_warnings(
-                    dust_analysis['dust_risk_score'], dust_analysis['dust_indicators']
-                )
-                
-                dust_analysis['recommended_action'] = await self._get_dust_recommendation(
-                    dust_analysis['dust_risk_score'], dust_analysis['dust_indicators']
-                )
-            
-            # 10. Create analysis summary
-            dust_analysis['analysis'] = self._create_analysis_summary(dust_analysis)
+            # Check by token name patterns
+            token_name_lower = token_name.lower()
+            for name_pattern in project_data['token_names']:
+                if name_pattern in token_name_lower:
+                    verification_result.update({
+                        'is_legitimate': True,
+                        'verification_level': project_data['verification_level'],
+                        'project_info': project_data,
+                        'legitimacy_score': project_data['reputation_score'] * 0.7,  # Lower for name pattern
+                        'verification_evidence': ['token_name_pattern', f'likely_{project_id}']
+                    })
+                    # Don't return yet, keep checking for better matches
         
-        except Exception as e:
-            # Handle analysis errors gracefully
-            dust_analysis['error'] = f"Dust analysis failed: {str(e)}"
-            dust_analysis['analysis'] = "Dust analysis encountered an error"
-            dust_analysis['threats_found'] = 0
-        
-        return dust_analysis
-    
-    def _classify_dust_amount(self, amount: float) -> Dict:
-        """Classify transaction amount as different levels of dust"""
-        thresholds = self.dust_patterns['solana_dust_thresholds']
-        
-        if amount <= thresholds['tiny_dust']:
-            return {
-                'is_dust': True, 
-                'dust_level': 'tiny', 
-                'severity': 0.9,
-                'description': 'Extremely small amount typical of tracking dust'
-            }
-        elif amount <= thresholds['small_dust']:
-            return {
-                'is_dust': True, 
-                'dust_level': 'small', 
-                'severity': 0.7,
-                'description': 'Small amount possibly used for wallet enumeration'
-            }
-        elif amount <= thresholds['medium_dust']:
-            return {
-                'is_dust': True, 
-                'dust_level': 'medium', 
-                'severity': 0.5,
-                'description': 'Medium dust amount potentially suspicious'
-            }
-        elif amount <= thresholds['tracking_threshold']:
-            return {
-                'is_dust': True, 
-                'dust_level': 'large_dust', 
-                'severity': 0.3,
-                'description': 'Large dust amount, may be legitimate'
-            }
-        else:
-            return {
-                'is_dust': False, 
-                'dust_level': 'normal', 
-                'severity': 0.0,
-                'description': 'Normal transaction amount'
-            }
-    
-    async def _analyze_sender_behavior(self, transaction_data: Dict) -> Dict:
-        """Analyze sender's historical behavior for dust attack indicators"""
-        sender = transaction_data.get('from_address', '')
-        
-        # Gather sender behavior metrics
-        sender_analysis = {
-            'is_new_wallet': await self._is_new_wallet(sender),
-            'transaction_count': await self._get_transaction_count(sender),
-            'dust_sent_count': await self._count_dust_transactions(sender),
-            'target_diversity': await self._analyze_target_diversity(sender),
-            'creation_time': await self._get_wallet_creation_time(sender),
-            'suspicious_indicators': []
+        return verification_result
+
+    def check_threat_intelligence(self, address: str, token_name: str = "") -> Dict:
+        """
+        Check if address or token matches known threats
+        """
+        threat_result = {
+            'is_threat': False,
+            'threat_level': 'none',
+            'threat_details': None,
+            'evidence': []
         }
         
-        # Calculate sender suspicion score based on behavior
-        suspicion_score = 0.0
+        # Check known scammer addresses
+        if address in self.threat_database['known_scammer_addresses']:
+            threat_info = self.threat_database['known_scammer_addresses'][address]
+            threat_result.update({
+                'is_threat': True,
+                'threat_level': 'high',
+                'threat_details': threat_info,
+                'evidence': ['known_malicious_address'] + threat_info.get('evidence', [])
+            })
+            return threat_result
         
-        # New wallets sending dust are highly suspicious
-        if sender_analysis['is_new_wallet'] and sender_analysis['dust_sent_count'] > 0:
-            suspicion_score += 0.6
-            sender_analysis['suspicious_indicators'].append('new_wallet_sending_dust')
+        # Check for malicious token patterns
+        token_name_lower = token_name.lower()
         
-        # High volume of dust transactions
-        if sender_analysis['dust_sent_count'] > 10:
-            suspicion_score += 0.4
-            sender_analysis['suspicious_indicators'].append('high_dust_volume')
+        # Check fake token indicators
+        for fake_token in self.threat_database['malicious_token_patterns']['fake_token_indicators']:
+            if fake_token.lower() in token_name_lower:
+                threat_result.update({
+                    'is_threat': True,
+                    'threat_level': 'high',
+                    'threat_details': {'threat_type': 'fake_token', 'pattern': fake_token},
+                    'evidence': ['fake_token_pattern', f'matches_{fake_token}']
+                })
+                return threat_result
         
-        # High target diversity (sending to many different wallets)
-        if sender_analysis['target_diversity'] > 0.8:
-            suspicion_score += 0.5
-            sender_analysis['suspicious_indicators'].append('high_target_diversity')
+        # Check scam keywords
+        for scam_keyword in self.threat_database['malicious_token_patterns']['scam_keywords']:
+            if scam_keyword in token_name_lower:
+                threat_result.update({
+                    'is_threat': True,
+                    'threat_level': 'medium',
+                    'threat_details': {'threat_type': 'suspicious_keyword', 'keyword': scam_keyword},
+                    'evidence': ['scam_keyword', f'contains_{scam_keyword}']
+                })
+                # Don't return, check for more severe threats
         
-        # Low total transaction count but high dust count ratio
-        if (sender_analysis['transaction_count'] > 0 and 
-            sender_analysis['dust_sent_count'] / sender_analysis['transaction_count'] > 0.7):
-            suspicion_score += 0.3
-            sender_analysis['suspicious_indicators'].append('high_dust_ratio')
+        # Check suspicious address patterns
+        address_lower = address.lower()
+        for pattern in self.threat_database['malicious_token_patterns']['suspicious_address_patterns']:
+            if pattern in address_lower:
+                current_level = threat_result['threat_level']
+                if current_level == 'none':
+                    threat_result.update({
+                        'is_threat': True,
+                        'threat_level': 'low',
+                        'threat_details': {'threat_type': 'suspicious_address', 'pattern': pattern},
+                        'evidence': ['suspicious_address_pattern', f'contains_{pattern}']
+                    })
         
-        sender_analysis['suspicion_score'] = min(suspicion_score, 1.0)
-        sender_analysis['is_suspicious'] = suspicion_score > 0.5
-        
-        return sender_analysis
-    
-    async def _check_mass_distribution(self, transaction_data: Dict) -> Dict:
-        """Check for mass distribution patterns typical of dust attacks"""
-        sender = transaction_data.get('from_address', '')
-        amount = float(transaction_data.get('value', 0))
-        
-        mass_distribution = {
-            'is_mass_sender': False,
-            'recipients_count': await self._count_recent_recipients(sender),
-            'identical_amounts': await self._check_identical_amounts(sender),
-            'time_clustering': await self._analyze_time_clustering(sender),
-            'indicators': []
+        return threat_result
+
+    def submit_community_report(self, report_data: Dict) -> Dict:
+        """
+        Submit a community report for validation
+        """
+        report = {
+            'id': f"report_{datetime.now().timestamp()}",
+            'submitted_at': datetime.now().isoformat(),
+            'reporter_reputation': report_data.get('reporter_reputation', 0.5),
+            'report_type': report_data.get('report_type'),  # 'threat' or 'legitimate'
+            'target_address': report_data.get('address'),
+            'token_info': report_data.get('token_info', {}),
+            'evidence': report_data.get('evidence', []),
+            'description': report_data.get('description', ''),
+            'validation_status': 'pending',
+            'validation_votes': {'confirm': 0, 'deny': 0}
         }
         
-        # Check for mass sending behavior
-        if mass_distribution['recipients_count'] > self.dust_patterns['suspicious_patterns']['mass_sender_threshold']:
-            mass_distribution['is_mass_sender'] = True
-            mass_distribution['indicators'].append('mass_sender')
+        # Add to pending validation queue
+        self.threat_database['community_reports']['pending_validation'].append(report)
         
-        # Check for identical amounts (scammer signature)
-        if mass_distribution['identical_amounts']:
-            mass_distribution['indicators'].append('identical_amounts')
-        
-        # Check for time clustering (automated behavior)
-        if mass_distribution['time_clustering']:
-            mass_distribution['indicators'].append('time_clustering')
-        
-        return mass_distribution
-    
-    async def _detect_tracking_patterns(self, transaction_data: Dict) -> Dict:
-        """Detect patterns indicating wallet tracking attempts"""
-        sender = transaction_data.get('from_address', '')
-        recipient = transaction_data.get('to_address', '')
-        
-        tracking_patterns = {
-            'is_tracking': False,
-            'targets_fresh_wallets': await self._targets_fresh_wallets(sender),
-            'sequential_targeting': await self._shows_sequential_targeting(sender),
-            'cross_exchange_tracking': await self._shows_cross_exchange_tracking(sender, recipient),
-            'indicators': []
+        return {
+            'success': True,
+            'report_id': report['id'],
+            'status': 'submitted_for_validation'
+        }
+
+    def get_community_sentiment(self, project_name: str, token_symbol: str) -> Dict:
+        """
+        Get community sentiment about a project
+        This would integrate with your RAG system for real sentiment analysis
+        """
+        sentiment_analysis = {
+            'overall_sentiment': 'neutral',
+            'confidence': 0.5,
+            'positive_indicators': [],
+            'negative_indicators': [],
+            'community_discussions': 0,
+            'recent_mentions': 0
         }
         
-        # Check if sender targets newly created wallets
-        if tracking_patterns['targets_fresh_wallets']:
-            tracking_patterns['is_tracking'] = True
-            tracking_patterns['indicators'].append('targets_fresh_wallets')
-        
-        # Check for sequential targeting patterns
-        if tracking_patterns['sequential_targeting']:
-            tracking_patterns['is_tracking'] = True
-            tracking_patterns['indicators'].append('sequential_targeting')
-        
-        # Check for cross-exchange tracking
-        if tracking_patterns['cross_exchange_tracking']:
-            tracking_patterns['is_tracking'] = True
-            tracking_patterns['indicators'].append('cross_exchange_tracking')
-        
-        return tracking_patterns
-    
-    async def _analyze_phishing_patterns(self, transaction_data: Dict) -> Dict:
-        """Analyze transaction for phishing-related patterns"""
-        token_name = transaction_data.get('token_name', '').lower()
-        token_symbol = transaction_data.get('token_symbol', '').lower()
-        from_address = transaction_data.get('from_address', '').lower()
-        
-        phishing_analysis = {
-            'is_phishing_attempt': False,
-            'phishing_indicators': [],
-            'token_analysis': {},
-            'address_analysis': {}
-        }
-        
-        # Check token name for phishing keywords
-        phishing_keywords_found = [
-            keyword for keyword in self.dust_patterns['phishing_keywords'] 
-            if keyword in token_name or keyword in token_symbol
-        ]
-        
-        if phishing_keywords_found:
-            phishing_analysis['is_phishing_attempt'] = True
-            phishing_analysis['phishing_indicators'].append('phishing_token_name')
-            phishing_analysis['token_analysis']['phishing_keywords'] = phishing_keywords_found
-        
-        # Check for suspicious address patterns
-        suspicious_address_patterns = ['dead', '0000000', '1111111']
-        address_flags = [pattern for pattern in suspicious_address_patterns if pattern in from_address]
-        
-        if address_flags:
-            phishing_analysis['is_phishing_attempt'] = True
-            phishing_analysis['phishing_indicators'].append('suspicious_sender_address')
-            phishing_analysis['address_analysis']['suspicious_patterns'] = address_flags
-        
-        # Check for fake token names mimicking popular tokens
-        popular_tokens = ['usdc', 'usdt', 'sol', 'btc', 'eth']
-        for popular in popular_tokens:
-            if popular in token_name and token_name != popular:
-                phishing_analysis['is_phishing_attempt'] = True
-                phishing_analysis['phishing_indicators'].append('token_name_mimicry')
-                phishing_analysis['token_analysis']['mimicked_token'] = popular
+        # Check if it's a known legitimate project
+        for project_id, project_data in self.legitimate_projects.items():
+            if token_symbol.upper() in project_data['token_symbols'] or project_name.lower() in project_data['token_names']:
+                sentiment_analysis.update({
+                    'overall_sentiment': 'positive',
+                    'confidence': project_data['reputation_score'],
+                    'positive_indicators': [
+                        'verified_project',
+                        f'established_{project_data["category"]}_protocol',
+                        'active_community'
+                    ]
+                })
                 break
         
-        return phishing_analysis
+        # TODO: Integrate with RAG system to analyze:
+        # - Social media mentions
+        # - Community forum discussions  
+        # - Developer activity
+        # - Recent news and announcements
+        
+        return sentiment_analysis
+
+    def update_project_database(self, new_projects: Dict):
+        """
+        Update the legitimate projects database
+        """
+        for project_id, project_data in new_projects.items():
+            if self._validate_project_data(project_data):
+                self.legitimate_projects[project_id] = project_data
+                print(f"✅ Added/updated project: {project_id}")
+            else:
+                print(f"❌ Invalid project data for: {project_id}")
+
+    def update_threat_database(self, new_threats: Dict):
+        """
+        Update the threat database with new malicious addresses/patterns
+        """
+        if 'addresses' in new_threats:
+            self.threat_database['known_scammer_addresses'].update(new_threats['addresses'])
+        
+        if 'patterns' in new_threats:
+            for pattern_type, patterns in new_threats['patterns'].items():
+                if pattern_type in self.threat_database['malicious_token_patterns']:
+                    self.threat_database['malicious_token_patterns'][pattern_type].extend(patterns)
+
+    def export_for_rag_system(self) -> Dict:
+        """
+        Export data in format suitable for RAG system ingestion
+        """
+        rag_data = {
+            'legitimate_projects_context': [],
+            'threat_intelligence_context': [],
+            'community_reports_context': []
+        }
+        
+        # Format legitimate projects for RAG
+        for project_id, project_data in self.legitimate_projects.items():
+            context = f"""
+            Legitimate Project: {project_id.upper()}
+            Token Symbol: {', '.join(project_data['token_symbols'])}
+            Official Addresses: {', '.join(project_data['official_addresses'])}
+            Verification Level: {project_data['verification_level']}
+            Category: {project_data['category']}
+            Description: {project_data['description']}
+            Reputation Score: {project_data['reputation_score']}
+            Known for: Legitimate {project_data['category']} project on Solana
+            """
+            rag_data['legitimate_projects_context'].append(context)
+        
+        # Format threat intelligence for RAG
+        for address, threat_info in self.threat_database['known_scammer_addresses'].items():
+            context = f"""
+            Malicious Address: {address}
+            Threat Type: {threat_info['threat_type']}
+            Description: {threat_info['description']}
+            Report Count: {threat_info['report_count']}
+            Evidence: {', '.join(threat_info['evidence'])}
+            Status: Known scammer - avoid all interactions
+            """
+            rag_data['threat_intelligence_context'].append(context)
+        
+        return rag_data
+
+    def _validate_project_data(self, project_data: Dict) -> bool:
+        """
+        Validate project data structure
+        """
+        required_fields = [
+            'official_addresses', 'token_symbols', 'token_names',
+            'reputation_score', 'verification_level', 'category'
+        ]
+        
+        for field in required_fields:
+            if field not in project_data:
+                return False
+        
+        return True
+
+    def get_stats(self) -> Dict:
+        """
+        Get database statistics
+        """
+        return {
+            'legitimate_projects': len(self.legitimate_projects),
+            'known_threats': len(self.threat_database['known_scammer_addresses']),
+            'pending_reports': len(self.threat_database['community_reports']['pending_validation']),
+            'verification_levels': {
+                'fully_verified': len([p for p in self.legitimate_projects.values() if p['verification_level'] == 'fully_verified']),
+                'verified': len([p for p in self.legitimate_projects.values() if p['verification_level'] == 'verified']),
+                'community_approved': len([p for p in self.legitimate_projects.values() if p['verification_level'] == 'community_approved'])
+            }
+        }
+
+
+# Integration example with RAG system
+class RAGCommunityIntegration:
+    """
+    Integration layer between Community Database and RAG system
+    """
     
-    async def _calculate_dust_risk(self, dust_classification: Dict, sender_analysis: Dict,
-                                 mass_distribution: Dict, tracking_patterns: Dict,
-                                 phishing_analysis: Dict) -> float:
-        """Calculate overall dust attack risk score from all analysis components"""
-        risk_score = 0.0
+    def __init__(self, community_db: EnhancedCommunityDatabase, rag_client):
+        self.community_db = community_db
+        self.rag_client = rag_client
         
-        # Base risk from dust amount classification
-        risk_score += dust_classification['severity'] * 0.3
+    async def sync_community_data_to_rag(self):
+        """
+        Sync community database to RAG system for intelligent queries
+        """
+        rag_data = self.community_db.export_for_rag_system()
         
-        # Risk from sender behavior
-        if sender_analysis.get('is_suspicious', False):
-            risk_score += sender_analysis.get('suspicion_score', 0) * 0.3
+        # Upload legitimate projects context
+        for context in rag_data['legitimate_projects_context']:
+            await self.rag_client.save_context("legitimate_projects", context)
         
-        # Risk from mass distribution patterns
-        if mass_distribution.get('is_mass_sender', False):
-            risk_score += 0.3
+        # Upload threat intelligence context  
+        for context in rag_data['threat_intelligence_context']:
+            await self.rag_client.save_context("threat_intelligence", context)
         
-        # Risk from tracking patterns
-        if tracking_patterns.get('is_tracking', False):
-            risk_score += 0.25
-        
-        # Risk from phishing indicators
-        if phishing_analysis.get('is_phishing_attempt', False):
-            risk_score += 0.35
-        
-        return min(risk_score, 1.0)
+        print("✅ Community database synced to RAG system")
     
-    async def _generate_dust_warnings(self, risk_score: float, indicators: List[str]) -> List[str]:
-        """Generate user-friendly warnings about dust attack risks"""
-        warnings = []
-        
-        if risk_score > 0.8:
-            warnings.append("🚨 High-confidence dust attack detected - avoid interacting with this transaction")
-        elif risk_score > 0.6:
-            warnings.append("⚠️ Suspicious dust transaction - likely tracking attempt")
-        elif risk_score > 0.4:
-            warnings.append("💡 Potential dust attack - monitor for follow-up phishing attempts")
-        
-        # Specific warnings based on indicators
-        if 'phishing_token_name' in indicators:
-            warnings.append("🎣 Phishing token detected - contains suspicious keywords")
-        
-        if 'mass_sender' in indicators:
-            warnings.append("📡 Mass distribution detected - sender targeting many wallets")
-        
-        if 'targets_fresh_wallets' in indicators:
-            warnings.append("🎯 Wallet targeting detected - scammer focusing on new wallets")
-        
-        return warnings
-    
-    async def _get_dust_recommendation(self, risk_score: float, indicators: List[str]) -> str:
-        """Get security recommendation based on dust analysis results"""
-        if risk_score > 0.8:
-            return 'quarantine_immediately'
-        elif risk_score > 0.6:
-            return 'quarantine_with_warning'
-        elif risk_score > 0.3:
-            return 'flag_and_monitor'
+    async def query_enhanced_intelligence(self, query: str) -> Dict:
+        """
+        Query RAG system with enhanced community intelligence
+        """
+        # First check local database for quick lookups
+        if "legitimate" in query.lower() or "verified" in query.lower():
+            rag_context = "legitimate_projects"
+        elif "scam" in query.lower() or "threat" in query.lower():
+            rag_context = "threat_intelligence"
         else:
-            return 'allow_but_track'
-    
-    def _create_analysis_summary(self, dust_analysis: Dict) -> str:
-        """Create human-readable analysis summary"""
-        if dust_analysis['is_dust_attack']:
-            return f"Dust attack detected with {dust_analysis['dust_risk_score']:.1%} confidence. Found {len(dust_analysis['dust_indicators'])} suspicious indicators."
-        elif dust_analysis['dust_type'] != 'none':
-            return f"Dust transaction detected ({dust_analysis['dust_type']} level) but appears benign."
-        else:
-            return "Normal transaction - no dust attack indicators found."
-    
-    # Placeholder methods for blockchain data integration
-    # Replace these with real Solana RPC calls via meta-swap-api
-    
-    async def _is_new_wallet(self, address: str) -> bool:
-        """Check if wallet was recently created (indicates potential scammer wallet)"""
-        # TODO: Integrate with Solana RPC to check wallet creation time
-        return False
-    
-    async def _get_transaction_count(self, address: str) -> int:
-        """Get total transaction count for address"""
-        # TODO: Integrate with Solana RPC to get transaction history
-        return 0
-    
-    async def _count_dust_transactions(self, address: str) -> int:
-        """Count how many dust transactions this address has sent"""
-        # TODO: Analyze transaction history for dust patterns
-        return 0
-    
-    async def _analyze_target_diversity(self, address: str) -> float:
-        """Analyze diversity of recipients (high diversity = suspicious)"""
-        # TODO: Calculate recipient diversity from transaction history
-        return 0.0
-    
-    async def _get_wallet_creation_time(self, address: str) -> Optional[datetime]:
-        """Get wallet creation timestamp"""
-        # TODO: Get wallet creation time from blockchain
-        return None
-    
-    async def _count_recent_recipients(self, address: str) -> int:
-        """Count unique recipients in recent time window"""
-        # TODO: Count unique recipients in last 24 hours
-        return 0
-    
-    async def _check_identical_amounts(self, address: str) -> bool:
-        """Check if sender uses identical amounts (scammer pattern)"""
-        # TODO: Analyze transaction amounts for identical patterns
-        return False
-    
-    async def _analyze_time_clustering(self, address: str) -> bool:
-        """Check for time clustering indicating automated behavior"""
-        # TODO: Analyze transaction timing patterns
-        return False
-    
-    async def _targets_fresh_wallets(self, address: str) -> bool:
-        """Check if sender targets newly created wallets"""
-        # TODO: Analyze recipient wallet ages
-        return False
-    
-    async def _shows_sequential_targeting(self, address: str) -> bool:
-        """Check for sequential targeting patterns"""
-        # TODO: Analyze sequential patterns in targeting
-        return False
-    
-    async def _shows_cross_exchange_tracking(self, sender: str, recipient: str) -> bool:
-        """Check for cross-exchange tracking patterns"""
-        # TODO: Analyze cross-exchange tracking behavior
-        return False
+            rag_context = "general"
+        
+        # Query RAG system with context
+        rag_response = await self.rag_client.query_with_context(query, rag_context)
+        
+        return {
+            'rag_response': rag_response,
+            'context_used': rag_context,
+            'confidence': 0.8 if rag_context != "general" else 0.5
+        }
