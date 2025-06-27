@@ -1,3 +1,8 @@
+"""
+Updated Starter Script with Background Intelligence Monitor
+Integrates 24/7 threat monitoring with existing SecurityAgent system
+"""
+
 import asyncio
 import os
 import requests
@@ -33,6 +38,9 @@ from src.constants import SERVICE_TO_ENV
 from src.manager import fetch_default_prompt
 from dotenv import load_dotenv
 
+# NEW: Import Background Monitor
+from src.intelligence.background_monitor import BackgroundIntelligenceMonitor, start_background_monitor
+
 load_dotenv()
 
 # Security agent default configuration
@@ -51,7 +59,7 @@ FE_DATA_SECURITY_DEFAULTS = {
 }
 
 
-async def start_security_agent(
+async def start_security_agent_with_background_monitor(
 	agent_type: str,
 	session_id: str,
 	agent_id: str,
@@ -63,7 +71,7 @@ async def start_security_agent(
 	meta_swap_api_url: str,
 	stream_fn: Callable[[str], None] = lambda x: print(x, flush=True, end=""),
 ):
-	"""Start security agent with blockchain threat monitoring and real-time protection"""
+	"""Start security agent with AI code generation AND 24/7 background monitoring"""
 	role = fe_data["role"]
 	network = fe_data["network"]
 	services_used = fe_data["research_tools"]
@@ -91,7 +99,7 @@ async def start_security_agent(
 
 	rag.save_result_batch_v4(previous_strategies)
 
-	# Create SecurityAgent
+	# Create SecurityAgent with AI code generation
 	agent = SecurityAgent(
 		agent_id=agent_id,
 		sensor=sensor,
@@ -102,16 +110,27 @@ async def start_security_agent(
 		rag=rag,
 	)
 
-	# 🚀 NEW: Connect SecuritySensor to SecurityAgent for real-time quarantine decisions
+	# Connect SecuritySensor to SecurityAgent for real-time quarantine decisions
 	if hasattr(sensor, 'set_security_agent'):
 		sensor.set_security_agent(agent)
-		logger.info("🔗 Connected SecuritySensor to SecurityAgent for quarantine decisions")
+		logger.info("🔗 Connected SecuritySensor to SecurityAgent for AI analysis")
 	
-	# 🚀 NEW: Start real-time incoming transaction monitoring
+	# 🚀 NEW: Start Background Intelligence Monitor
+	logger.info("🔍 Starting 24/7 Background Intelligence Monitor...")
+	try:
+		background_monitor = await start_background_monitor(db, rag)
+		logger.info("✅ Background Intelligence Monitor started successfully!")
+		logger.info("📡 Now monitoring: Twitter, Reddit, blacklisted wallets, blockchain patterns")
+	except Exception as e:
+		logger.warning(f"⚠️ Background Monitor failed to start: {e}")
+		logger.info("📊 Continuing without background monitoring")
+		background_monitor = None
+	
+	# Start real-time incoming transaction monitoring
 	if hasattr(sensor, 'start_incoming_monitor'):
 		try:
 			await sensor.start_incoming_monitor()
-			logger.info("🛡️ Real-time monitoring started - protecting against threats!")
+			logger.info("🛡️ Real-time transaction monitoring started!")
 		except Exception as e:
 			logger.warning(f"⚠️ Could not start real-time monitoring: {e}")
 			logger.info("📊 Continuing with periodic analysis only")
@@ -130,18 +149,26 @@ async def start_security_agent(
 		summarizer=summarizer,
 	)
 
-	await run_cycle(
-		agent,
-		notif_sources,
-		flow_func,
-		db,
-		session_id,
-		agent_id,
-		fe_data,
-	)
+	# Run main cycle with background monitoring active
+	try:
+		await run_cycle_with_background_monitor(
+			agent,
+			notif_sources,
+			flow_func,
+			db,
+			session_id,
+			agent_id,
+			fe_data,
+			background_monitor,
+		)
+	finally:
+		# Cleanup: Stop background monitor when main cycle ends
+		if background_monitor:
+			logger.info("🛑 Stopping background monitor...")
+			await background_monitor.stop_monitoring()
 
 
-async def run_cycle(
+async def run_cycle_with_background_monitor(
 	agent: SecurityAgent,
 	notif_sources: list[str],
 	flow: Callable[[StrategyData | None, str | None], None],
@@ -149,22 +176,79 @@ async def run_cycle(
 	session_id: str,
 	agent_id: str,
 	fe_data: dict | None = None,
+	background_monitor: BackgroundIntelligenceMonitor | None = None,
 ):
-	"""Execute security agent workflow cycle with previous strategy context"""
-	prev_strat = agent.db.fetch_latest_strategy(agent.agent_id)
-	if prev_strat is not None:
-		logger.info(f"Previous security strategy is {prev_strat}")
-		agent.rag.save_result_batch_v4([prev_strat])
+	"""Execute security agent workflow cycle with background intelligence"""
+	cycle_count = 0
+	
+	while True:  # Continuous monitoring loop
+		try:
+			cycle_count += 1
+			logger.info(f"🔄 Starting security cycle #{cycle_count}")
+			
+			# Get previous strategy context
+			prev_strat = agent.db.fetch_latest_strategy(agent.agent_id)
+			if prev_strat is not None:
+				logger.info(f"📚 Using previous security strategy: {prev_strat.summarized_desc[:100]}...")
+				agent.rag.save_result_batch_v4([prev_strat])
 
-	notif_limit = 5 if fe_data is None else 2
-	current_notif = agent.db.fetch_latest_notification_str_v2(
-		notif_sources, notif_limit
-	)
-	logger.info(f"Latest security notification is {current_notif}")
-	logger.info("Added the previous security strategy onto the RAG manager")
+			# Get latest notifications + background intelligence
+			notif_limit = 5 if fe_data is None else 2
+			current_notif = agent.db.fetch_latest_notification_str_v2(
+				notif_sources, notif_limit
+			)
+			
+			# 🚀 NEW: Enhance notifications with background intelligence
+			if background_monitor:
+				try:
+					# Get recent threat intelligence from background monitor
+					monitor_status = await background_monitor.get_monitoring_status()
+					
+					if monitor_status['statistics']['threats_discovered'] > 0:
+						threat_summary = f"Background Monitor Alert: {monitor_status['statistics']['threats_discovered']} new threats detected. "
+						threat_summary += f"Tracking {monitor_status['blacklisted_wallets']} blacklisted wallets. "
+						threat_summary += f"Last update: {monitor_status['statistics']['last_update']}"
+						
+						# Combine with existing notifications
+						if current_notif:
+							current_notif = f"{threat_summary}\n\nOther notifications: {current_notif}"
+						else:
+							current_notif = threat_summary
+						
+						logger.info(f"🚨 Enhanced notifications with background intelligence")
+				except Exception as e:
+					logger.warning(f"⚠️ Failed to get background intelligence: {e}")
+			
+			logger.info(f"📢 Processing notifications: {current_notif[:100] if current_notif else 'No new notifications'}...")
 
-	flow(prev_strat=prev_strat, notif_str=current_notif)
-	db.add_cycle_count(session_id, agent_id)
+			# Run the main security analysis flow
+			flow(prev_strat=prev_strat, notif_str=current_notif)
+			db.add_cycle_count(session_id, agent_id)
+			
+			# Show monitoring status every 10 cycles
+			if cycle_count % 10 == 0 and background_monitor:
+				try:
+					status = await background_monitor.get_monitoring_status()
+					logger.info(f"📊 Background Monitor Status:")
+					logger.info(f"   🔍 Threats discovered: {status['statistics']['threats_discovered']}")
+					logger.info(f"   🚫 Wallets tracked: {status['blacklisted_wallets']}")
+					logger.info(f"   📱 Social media scans: {status['statistics']['social_media_scans']}")
+					logger.info(f"   💾 Database updates: {status['statistics']['database_updates']}")
+				except Exception as e:
+					logger.warning(f"⚠️ Error getting monitor status: {e}")
+			
+			# Wait before next cycle (configurable)
+			cycle_interval = int(os.getenv('SECURITY_CYCLE_INTERVAL', 900))  # 15 minutes default
+			logger.info(f"⏰ Waiting {cycle_interval} seconds before next cycle...")
+			await asyncio.sleep(cycle_interval)
+			
+		except KeyboardInterrupt:
+			logger.info("🛑 Security monitoring stopped by user")
+			break
+		except Exception as e:
+			logger.error(f"❌ Error in security cycle: {e}")
+			# Wait before retrying
+			await asyncio.sleep(60)
 
 
 def setup_security_sensor() -> SecuritySensorInterface:
@@ -197,6 +281,55 @@ def setup_security_sensor() -> SecuritySensorInterface:
 		helius_api_key=HELIUS_API_KEY or "",
 	)
 	return sensor
+
+
+def extra_background_monitor_questions():
+	"""Ask user about background monitoring configuration"""
+	questions = [
+		inquirer.List(
+			name="enable_background_monitor",
+			message="Enable 24/7 background intelligence monitoring?",
+			choices=[
+				"Yes - Monitor Twitter, Reddit, blacklisted wallets",
+				"No - Just real-time transaction analysis"
+			],
+		)
+	]
+	
+	if inquirer.prompt(questions)["enable_background_monitor"].startswith("Yes"):
+		# Ask for API keys
+		api_questions = []
+		
+		if not os.getenv("TWITTER_BEARER_TOKEN"):
+			api_questions.append(
+				inquirer.Password(
+					"twitter_token", 
+					message="Twitter Bearer Token (optional, for social media monitoring):",
+					default=""
+				)
+			)
+		
+		if not os.getenv("REDDIT_CLIENT_ID"):
+			api_questions.append(
+				inquirer.Text(
+					"reddit_client_id", 
+					message="Reddit Client ID (optional, for Reddit monitoring):",
+					default=""
+				)
+			)
+		
+		if api_questions:
+			api_answers = inquirer.prompt(api_questions)
+			
+			if api_answers.get("twitter_token"):
+				os.environ["TWITTER_BEARER_TOKEN"] = api_answers["twitter_token"]
+			
+			if api_answers.get("reddit_client_id"):
+				os.environ["REDDIT_CLIENT_ID"] = api_answers["reddit_client_id"]
+		
+		return True
+	else:
+		return False
 
 
 def extra_research_tools_questions(answer_research_tools):
@@ -289,127 +422,90 @@ def extra_sensor_questions():
 					os.environ[x] = answer_sensor_api_keys[x]
 		
 		sensor = setup_security_sensor()
-		logger.info("🚀 Real-time SecuritySensor configured - incoming transactions will be monitored!")
+		logger.info("🚀 Real-time SecuritySensor configured!")
+		return sensor
 	else:
-		sensor = MockSecuritySensor(
-			wallet_addresses=["mock_wallet_1", "mock_wallet_2"],
-			solana_rpc_url="mock://solana-rpc",
-			helius_api_key="mock_helius_key"
-		)
-		logger.info("📊 Mock SecuritySensor configured - periodic analysis only")
-
-	return sensor
+		logger.info("📊 Using Mock SecuritySensor for testing")
+		return MockSecuritySensor(["demo_wallet"], "mock_rpc", "mock_key")
 
 
 def extra_rag_questions(answer_rag):
-	"""Configure RAG client based on setup status"""
+	"""Configure RAG client"""
 	if answer_rag == "Yes, i have setup the RAG":
-		rag_url = os.getenv("RAG_URL", "http://localhost:8080")
-		logger.info(f"Checking default address of RAG service {rag_url}")
-		try:
-			resp = requests.get(rag_url + "/health")
-			resp.raise_for_status()
-			rag = RAGClient(
-				base_url=rag_url,
-				session_id="default_security",
-				agent_id="default_security",
-			)
-			logger.info("Successfully connected to the RAG service in PORT 8080")
-		except Exception as e:
-			print(e)
-			logger.error("RAG hasn't been setup properly. Falling back to Mock RAG API")
-			rag = MockRAGClient(
-				session_id="default_security",
-				agent_id="default_security",
-			)
+		return RAGClient(os.getenv("RAG_SERVICE_URL", "http://localhost:8080"))
 	else:
-		rag = MockRAGClient(
-			session_id="default_security",
-			agent_id="default_security",
-		)
-	return rag
-
-
-async def stop_monitoring_gracefully(sensor):
-	"""Gracefully stop real-time monitoring"""
-	if hasattr(sensor, 'stop_monitoring'):
-		sensor.stop_monitoring()
-		logger.info("🛑 Real-time monitoring stopped gracefully")
+		logger.info("📚 Using Mock RAG for testing")
+		return MockRAGClient()
 
 
 async def main_security_loop(fe_data, genner, rag_client, sensor):
-	"""Main async loop for security agent with real-time monitoring"""
-	logger.info("🛡️ Starting Security Agent Framework with Real-Time Protection")
-	logger.info("Monitoring Solana blockchain for wallet threats...")
+	"""Main async loop for security agent with background monitoring"""
 	
-	try:
-		# Run security agent cycles with real-time monitoring
-		for cycle in range(3):
-			logger.info(f"📊 Starting security analysis cycle {cycle + 1}/3")
-			
-			await start_security_agent(
-				agent_type="security",
-				session_id="default_security",
-				agent_id="default_security",
-				fe_data=fe_data,
-				genner=genner,
-				db=SQLiteDB(
-					db_path=os.getenv("SQLITE_PATH", "../db/superior-agents.db")
-				),
-				rag=rag_client,
-				sensor=sensor,
-				meta_swap_api_url=os.getenv("META_SWAP_API_URL"),
-			)
-			
-			session_interval = 15
-			if cycle < 2:  # Don't wait after the last cycle
-				logger.info(
-					f"⏱️ Waiting {session_interval} seconds before next cycle (real-time monitoring continues)..."
-				)
-				await asyncio.sleep(session_interval)
+	# Initialize database
+	db = SQLiteDB(db_path=os.getenv("SQLITE_PATH", "./db/security.db"))
 	
-	except KeyboardInterrupt:
-		logger.info("🛑 Received shutdown signal...")
-	except Exception as e:
-		logger.error(f"❌ Error in security agent: {e}")
-	finally:
-		# Gracefully stop monitoring
-		await stop_monitoring_gracefully(sensor)
-		logger.info("✅ Security Agent Framework stopped")
+	# Generate session and agent IDs
+	session_id = f"security_session_{int(time.time())}"
+	agent_id = f"security_agent_{fe_data['agent_name']}"
+	
+	logger.info(f"🆔 Session ID: {session_id}")
+	logger.info(f"🤖 Agent ID: {agent_id}")
+	
+	# Start the enhanced security agent with background monitoring
+	await start_security_agent_with_background_monitor(
+		agent_type="security",
+		session_id=session_id,
+		agent_id=agent_id,
+		fe_data=fe_data,
+		genner=genner,
+		rag=rag_client,
+		sensor=sensor,
+		db=db,
+		meta_swap_api_url=os.getenv("META_SWAP_API_URL", "http://localhost:9009"),
+	)
 
 
 def starter_prompt():
-	"""Main interactive prompt for security agent configuration"""
+	"""Enhanced starter prompt with background monitoring options"""
+	
 	choices_research_tools = [
 		"Solana RPC",
-		"Threat Intelligence",
+		"Threat Intelligence", 
 		"DuckDuckGo",
+		"CoinGecko",
+		"Etherscan", 
+		"1inch",
+		"Infura"
 	]
 	
-	choices_notifications = ["blockchain_alerts", "security_alerts"]
-
+	choices_notifications = [
+		"blockchain_alerts",
+		"security_alerts",
+		"community_reports"
+	]
+	
 	questions = [
+		inquirer.Text("agent_name", message="What's the name of your security agent?", default="MySecurityAgent"),
 		inquirer.List(
 			name="model",
-			message="Which model do you want to use for security analysis?",
+			message="Which AI model do you want to use for analysis and code generation?",
 			choices=[
 				"Claude",
 				"OpenAI",
 				"OpenAI (openrouter)",
-				"Gemini (openrouter)",
+				"Gemini (openrouter)", 
 				"QWQ (openrouter)",
-				"Mock LLM",
+				"Mock LLM"
 			],
-			default=["Claude"],
 		),
 		inquirer.Checkbox(
 			"research_tools",
-			message="Which security research tools do you want to use (use space to choose)?",
+			message="Which research tools do you want to use? (use space to choose)",
 			choices=[service for service in choices_research_tools],
 		),
 		inquirer.Checkbox(
 			"notifications",
-			message="Which notifications do you want to use (use space to choose) (optional)?",
+			message="Which notifications do you want to use? (use space to choose) (optional)",
 			choices=[service for service in choices_notifications],
 		),
 		inquirer.List(
@@ -420,17 +516,18 @@ def starter_prompt():
 	]
 	answers = inquirer.prompt(questions)
 
+	# Setup components
 	rag_client = extra_rag_questions(answers["rag"])
 	model_name = extra_model_questions(answers["model"])
 	extra_research_tools_questions(answers["research_tools"])
-
 	sensor = extra_sensor_questions()
+	
+	# 🚀 NEW: Ask about background monitoring
+	enable_background_monitor = extra_background_monitor_questions()
 
 	# Set up security agent configuration
-	os.environ["META_SWAP_API_URL"] = os.getenv(
-		"META_SWAP_API_URL", "http://localhost:9009"
-	)
 	fe_data = FE_DATA_SECURITY_DEFAULTS.copy()
+	fe_data["agent_name"] = answers["agent_name"]
 
 	# Filter research tools to security-relevant ones
 	security_research_tools = ["Solana RPC", "Threat Intelligence", "DuckDuckGo"]
@@ -441,7 +538,9 @@ def starter_prompt():
 	fe_data["notifications"] = answers["notifications"]
 	fe_data["prompts"] = fetch_default_prompt(fe_data, "security")
 	fe_data["model"] = model_name
+	fe_data["enable_background_monitor"] = enable_background_monitor
 
+	# Initialize AI generators
 	or_client = (
 		OpenRouter(
 			base_url="https://openrouter.ai/api/v1",
@@ -465,7 +564,8 @@ def starter_prompt():
 		stream_fn=lambda token: print(token, end="", flush=True),
 	)
 	
-	# 🚀 NEW: Run the main async loop with real-time monitoring
+	# Start the main security loop with background monitoring
+	logger.info("🚀 Starting AI-Powered Security System with Background Intelligence...")
 	asyncio.run(main_security_loop(fe_data, genner, rag_client, sensor))
 
 

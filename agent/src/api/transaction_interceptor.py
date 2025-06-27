@@ -1,35 +1,38 @@
 """
-Transaction Interceptor API
-Real-time transaction analysis service for wallet providers
+Transaction Interceptor API - AI Code Generation Integration
+Real-time transaction analysis using SecurityAgent's AI code generation
 Provides ALLOW/WARN/BLOCK decisions before transaction signing
 """
 
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, Depends
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import asyncio
 import json
 from datetime import datetime
 import logging
+import os
 
-from src.agent.security import SecurityAgent
+# Simplified imports - only what we need
+from src.agent.security import SecurityAgent, SecurityPromptGenerator
 from src.sensor.security import SecuritySensor
 from src.client.rag import RAGClient
 from src.db import SQLiteDB
 from src.genner import get_genner
 from src.container import ContainerManager
 import docker
-import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="Solana Security Interceptor API",
-    description="Real-time transaction security analysis for wallet providers",
-    version="1.0.0"
+    title="AI Security Transaction Interceptor",
+    description="Real-time transaction security analysis using AI code generation",
+    version="2.0.0"
 )
+
+# ========== REQUEST/RESPONSE MODELS ==========
 
 class TransactionRequest(BaseModel):
     """Transaction data from wallet provider for analysis"""
@@ -38,86 +41,117 @@ class TransactionRequest(BaseModel):
     to_address: str
     amount: Optional[float] = None
     token_address: Optional[str] = None
+    token_name: Optional[str] = None
     program_id: Optional[str] = None
     instruction_data: Optional[str] = None
     value_usd: Optional[float] = None
     user_id: str
     wallet_provider: str  # "solflare", "phantom", etc.
     transaction_type: str  # "send", "swap", "contract_interaction"
+    dapp_url: Optional[str] = None
+    dapp_name: Optional[str] = None
+    user_language: str = "english"
     additional_data: Optional[Dict[str, Any]] = {}
 
 class SecurityResponse(BaseModel):
-    """Security analysis response to wallet provider"""
+    """AI-powered security analysis response"""
     action: str  # "ALLOW", "WARN", "BLOCK"
     risk_score: float  # 0.0 to 1.0
     confidence: float  # 0.0 to 1.0
-    reason: str
-    chain_of_thought: List[str]  # Step-by-step reasoning
+    user_explanation: str  # AI-generated explanation in user's language
+    chain_of_thought: List[str]  # Step-by-step AI reasoning
     threat_categories: List[str]
-    recommendations: List[str]
+    ai_generated_code: str  # The actual code AI wrote for analysis
+    technical_details: Dict[str, Any]  # Raw analysis results
     analysis_time_ms: int
     quarantine_recommended: bool
-    user_warnings: List[str]
+    analysis_method: str = "ai_code_generation"
 
-class MultiWalletStatusRequest(BaseModel):
-    """Request to check status across multiple wallets"""
+class DAppCheckRequest(BaseModel):
+    """Request to check DApp safety"""
+    dapp_url: str
+    dapp_name: Optional[str] = ""
     user_id: str
-    wallet_addresses: List[str]
-    wallet_provider: str
+    user_language: str = "english"
 
-class MultiWalletStatusResponse(BaseModel):
-    """Status response for multiple wallets"""
-    overall_risk_level: str  # "low", "medium", "high"
-    total_threats_detected: int
-    active_quarantine_items: int
-    wallet_statuses: Dict[str, Dict[str, Any]]
-    cross_wallet_patterns: List[str]
+class DAppCheckResponse(BaseModel):
+    """DApp safety check response"""
+    status: str  # "safe", "risky", "unknown"
+    risk_score: float
+    explanation: str
     recommendations: List[str]
+    analysis_details: Dict[str, Any]
 
-# Global security agent instance
+class UserQueryRequest(BaseModel):
+    """User natural language query request"""
+    user_message: str
+    user_id: str
+    user_language: str = "english"
+    context: Optional[Dict[str, Any]] = {}
+
+class UserQueryResponse(BaseModel):
+    """Response to user natural language query"""
+    response: str
+    action_taken: Optional[str] = None
+    analysis_performed: Optional[Dict[str, Any]] = None
+
+# ========== GLOBAL SECURITY AGENT ==========
+
 security_agent: Optional[SecurityAgent] = None
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize security agent on API startup"""
+    """Initialize AI-powered security agent on API startup"""
     global security_agent
     
     try:
-        logger.info("🛡️ Initializing Security Agent for API service...")
+        logger.info("🤖 Initializing AI-Powered Security Agent...")
         
         # Initialize components
         db = SQLiteDB(db_path=os.getenv("SQLITE_PATH", "./db/security-api.db"))
         
-        # Initialize RAG client
+        # Initialize RAG client for threat intelligence
         rag_service_url = os.getenv("RAG_SERVICE_URL", "http://localhost:8080")
         rag = RAGClient(rag_service_url)
         
-        # Initialize security sensor
-        rpc_url = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
-        meta_swap_api_url = os.getenv("TXN_SERVICE_URL", "http://localhost:9009")
-        sensor = SecuritySensor(rpc_url=rpc_url, meta_swap_api_url=meta_swap_api_url)
+        # Initialize security sensor with real Solana monitoring
+        monitored_wallets = []
+        wallet_env_vars = [key for key in os.environ.keys() if key.startswith("MONITOR_WALLET_")]
+        for wallet_var in wallet_env_vars:
+            wallet_address = os.environ[wallet_var]
+            if wallet_address:
+                monitored_wallets.append(wallet_address)
         
-        # Initialize LLM
+        if not monitored_wallets:
+            monitored_wallets = ["demo_wallet_1", "demo_wallet_2"]  # Demo wallets
+        
+        sensor = SecuritySensor(
+            wallet_addresses=monitored_wallets,
+            solana_rpc_url=os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com"),
+            helius_api_key=os.getenv("HELIUS_API_KEY", "")
+        )
+        
+        # Initialize AI generator
         genner = get_genner(
             backend="claude",
-            anthropic_client=None,  # Will be initialized based on env
+            anthropic_client=None,  # Will be initialized from env
             stream_fn=None
         )
         
-        # Initialize container manager
+        # Initialize container manager for safe code execution
         container_manager = ContainerManager(
             docker.from_env(),
-            "agent-executor",
+            "ai-security-executor",
             "./code",
             {}
         )
         
-        # Create security agent
-        from src.agent.security import SecurityPromptGenerator
+        # Initialize prompt generator
         prompt_generator = SecurityPromptGenerator({})
         
+        # Create AI-powered security agent
         security_agent = SecurityAgent(
-            agent_id="api_security_agent",
+            agent_id="api_ai_security_agent",
             sensor=sensor,
             genner=genner,
             container_manager=container_manager,
@@ -126,31 +160,36 @@ async def startup_event():
             rag=rag,
         )
         
-        logger.info("✅ Security Agent initialized successfully")
+        # Connect sensor to agent
+        sensor.set_security_agent(security_agent)
+        
+        logger.info("✅ AI Security Agent initialized successfully")
         
     except Exception as e:
-        logger.error(f"❌ Failed to initialize Security Agent: {e}")
+        logger.error(f"❌ Failed to initialize AI Security Agent: {e}")
         raise e
 
+# ========== MAIN TRANSACTION ANALYSIS ENDPOINT ==========
+
 @app.post("/api/v1/analyze-transaction", response_model=SecurityResponse)
-async def analyze_transaction(
+async def analyze_transaction_with_ai(
     request: TransactionRequest,
     x_api_key: Optional[str] = Header(None),
     x_wallet_provider: Optional[str] = Header(None)
 ):
     """
-    Real-time transaction analysis endpoint
+    MAIN ENDPOINT: Real-time transaction analysis using AI code generation
     Called by wallet providers BEFORE transaction signing
     """
     start_time = datetime.now()
     
     try:
         if not security_agent:
-            raise HTTPException(status_code=503, detail="Security agent not initialized")
+            raise HTTPException(status_code=503, detail="AI Security agent not initialized")
         
-        logger.info(f"🔍 Analyzing transaction from {request.wallet_provider} for user {request.user_id}")
+        logger.info(f"🔍 AI analyzing transaction from {request.wallet_provider} for user {request.user_id}")
         
-        # Prepare transaction data for analysis
+        # Prepare transaction data for AI analysis
         transaction_data = {
             "hash": request.transaction_hash or f"pending_{start_time.timestamp()}",
             "from_address": request.from_address,
@@ -158,275 +197,302 @@ async def analyze_transaction(
             "value": request.amount or 0,
             "value_usd": request.value_usd or 0,
             "token_address": request.token_address,
+            "token_name": request.token_name,
             "program_id": request.program_id,
             "instruction_data": request.instruction_data,
             "transaction_type": request.transaction_type,
+            "dapp_url": request.dapp_url,
+            "dapp_name": request.dapp_name,
             "timestamp": start_time.isoformat(),
             "user_id": request.user_id,
             "wallet_provider": request.wallet_provider,
+            "analysis_type": "outgoing_transaction",
             **request.additional_data
         }
         
-        # Chain of thought reasoning list
-        reasoning_steps = []
-        
-        # Step 1: Basic transaction validation
-        reasoning_steps.append("🔍 Step 1: Validating transaction structure and addresses")
-        
-        # Step 2: Security sensor analysis
-        reasoning_steps.append("📊 Step 2: Running comprehensive security analysis")
-        security_status = await security_agent.sensor.get_security_status()
-        
-        # Step 3: Multi-module threat analysis
-        reasoning_steps.append("🛡️ Step 3: Analyzing with MEV, dust, contract, and behavior detectors")
-        
-        # MEV analysis
-        mev_result = await security_agent.sensor.mev_detector.analyze_mev_risk(transaction_data)
-        mev_risk = mev_result.get('mev_risk', 0)
-        if mev_risk > 0.5:
-            reasoning_steps.append(f"⚠️ MEV risk detected: {mev_risk:.2f} - {mev_result.get('analysis', 'Potential front-running')}")
-        
-        # Dust attack analysis
-        dust_result = await security_agent.sensor.dust_detector.analyze_dust_attack(transaction_data)
-        dust_risk = dust_result.get('is_dust_attack', False)
-        if dust_risk:
-            reasoning_steps.append(f"🏠 Dust attack detected: {dust_result.get('analysis', 'Small value tracking transaction')}")
-        
-        # Contract analysis (if applicable)
-        contract_risk = 0
-        if request.program_id:
-            reasoning_steps.append(f"📋 Step 4: Analyzing smart contract {request.program_id[:8]}...")
-            contract_data = {"address": request.program_id}
-            contract_result = await security_agent.sensor.contract_analyzer.analyze_contract_for_drain_risk(contract_data)
-            contract_risk = contract_result.get('drain_risk_score', 0)
-            if contract_result.get('is_drain_contract', False):
-                reasoning_steps.append(f"🚨 DRAIN CONTRACT DETECTED: {contract_result.get('analysis', 'High risk contract')}")
-        
-        # Behavioral analysis
-        reasoning_steps.append("👤 Step 5: Analyzing user behavioral patterns")
-        behavior_result = await security_agent.sensor.behavior_analyzer.analyze_wallet_behavior(request.from_address)
-        behavior_risk = behavior_result.get('anomaly_score', 0)
-        if behavior_result.get('has_anomalies', False):
-            reasoning_steps.append(f"📈 Behavioral anomaly: {behavior_result.get('analysis', 'Unusual activity pattern')}")
-        
-        # Step 6: Calculate overall risk and make decision
-        reasoning_steps.append("⚖️ Step 6: Calculating overall risk score and making decision")
-        
-        # Combine risk scores
-        overall_risk = max(mev_risk, contract_risk, behavior_risk)
-        if dust_risk:
-            overall_risk = max(overall_risk, 0.8)
-        
-        # Decision logic with chain of thought
-        action = "ALLOW"
-        reason = "Transaction appears safe"
-        quarantine_recommended = False
-        threat_categories = []
-        user_warnings = []
-        recommendations = []
-        
-        if overall_risk >= 0.8:
-            action = "BLOCK"
-            reason = "High security risk detected - transaction blocked for user protection"
-            reasoning_steps.append(f"🛑 DECISION: BLOCK (risk: {overall_risk:.2f}) - Protecting user from high-risk transaction")
-            quarantine_recommended = True
-            
-        elif overall_risk >= 0.5:
-            action = "WARN"
-            reason = "Moderate security risk detected - user should review carefully"
-            reasoning_steps.append(f"⚠️ DECISION: WARN (risk: {overall_risk:.2f}) - User should be cautious")
-            
-        else:
-            reasoning_steps.append(f"✅ DECISION: ALLOW (risk: {overall_risk:.2f}) - Transaction appears safe")
-        
-        # Add specific threat categories
-        if mev_risk > 0.3:
-            threat_categories.append("mev_risk")
-            user_warnings.append(f"MEV risk detected - consider adjusting slippage")
-            
-        if dust_risk:
-            threat_categories.append("dust_attack")
-            user_warnings.append("Dust attack detected - transaction will be quarantined")
-            
-        if contract_risk > 0.3:
-            threat_categories.append("contract_risk")
-            user_warnings.append("Smart contract has elevated risk factors")
-            
-        if behavior_risk > 0.3:
-            threat_categories.append("behavioral_anomaly")
-            user_warnings.append("Unusual activity pattern detected")
-        
-        # Generate recommendations
-        if action == "BLOCK":
-            recommendations.extend([
-                "Do not proceed with this transaction",
-                "Verify the recipient address manually",
-                "Check if this is a legitimate contract or token"
-            ])
-        elif action == "WARN":
-            recommendations.extend([
-                "Review transaction details carefully",
-                "Consider using lower amounts for testing",
-                "Verify recipient legitimacy through official channels"
-            ])
+        # AI Code Generation Analysis Pipeline
+        logger.info("🤖 Starting AI code generation analysis...")
+        analysis_result = await security_agent.analyze_with_ai_code_generation(
+            transaction_data, 
+            request.user_language
+        )
         
         # Calculate analysis time
         end_time = datetime.now()
         analysis_time_ms = int((end_time - start_time).total_seconds() * 1000)
         
-        reasoning_steps.append(f"⏱️ Analysis completed in {analysis_time_ms}ms")
+        # Extract threat categories from AI analysis
+        threat_categories = []
+        threats_found = analysis_result.get('execution_results', {}).get('threats_found', [])
+        for threat in threats_found:
+            if 'mev' in threat.lower():
+                threat_categories.append('mev_attack')
+            elif 'honeypot' in threat.lower():
+                threat_categories.append('honeypot_token')
+            elif 'drain' in threat.lower():
+                threat_categories.append('drain_contract')
+            elif 'dust' in threat.lower():
+                threat_categories.append('dust_attack')
+            else:
+                threat_categories.append('unknown_threat')
         
-        # Create response
+        # Determine quarantine recommendation
+        quarantine_recommended = analysis_result.get('risk_score', 0) >= 0.7
+        
+        # Build response
         response = SecurityResponse(
-            action=action,
-            risk_score=overall_risk,
-            confidence=0.85,  # Could be calculated based on data quality
-            reason=reason,
-            chain_of_thought=reasoning_steps,
+            action=analysis_result.get('action', 'ALLOW'),
+            risk_score=analysis_result.get('risk_score', 0.0),
+            confidence=0.85,  # High confidence due to AI analysis
+            user_explanation=analysis_result.get('user_explanation', 'Transaction analyzed by AI'),
+            chain_of_thought=analysis_result.get('chain_of_thought', []),
             threat_categories=threat_categories,
-            recommendations=recommendations,
+            ai_generated_code=analysis_result.get('ai_generated_code', ''),
+            technical_details=analysis_result.get('technical_details', {}),
             analysis_time_ms=analysis_time_ms,
             quarantine_recommended=quarantine_recommended,
-            user_warnings=user_warnings
+            analysis_method="ai_code_generation"
         )
         
-        logger.info(f"✅ Analysis complete: {action} (risk: {overall_risk:.2f}) in {analysis_time_ms}ms")
+        logger.info(f"✅ AI Analysis complete: {response.action} (risk: {response.risk_score:.2f}) in {analysis_time_ms}ms")
         
         return response
         
     except Exception as e:
-        logger.error(f"❌ Transaction analysis failed: {e}")
-        # Return safe default - block on error
+        logger.error(f"❌ AI transaction analysis failed: {e}")
+        
+        # Safe default - block on error with explanation
         return SecurityResponse(
             action="BLOCK",
             risk_score=1.0,
             confidence=0.0,
-            reason=f"Analysis failed: {str(e)}",
-            chain_of_thought=[f"❌ Error during analysis: {str(e)}", "🛑 Blocking transaction for safety"],
+            user_explanation=f"AI analysis system unavailable. Transaction blocked for safety. Error: {str(e)}",
+            chain_of_thought=[f"❌ AI analysis error: {str(e)}", "🛑 Blocking transaction for safety"],
             threat_categories=["analysis_error"],
-            recommendations=["Retry transaction later", "Contact support if issue persists"],
+            ai_generated_code="# Analysis failed - no code generated",
+            technical_details={"error": str(e)},
             analysis_time_ms=0,
-            quarantine_recommended=True,
-            user_warnings=["Transaction analysis failed - blocked for safety"]
+            quarantine_recommended=True
         )
 
-@app.post("/api/v1/multi-wallet-status", response_model=MultiWalletStatusResponse)
-async def check_multi_wallet_status(
-    request: MultiWalletStatusRequest,
-    x_api_key: Optional[str] = Header(None)
-):
+# ========== DAPP REPUTATION CHECK ENDPOINT ==========
+
+@app.post("/api/v1/check-dapp", response_model=DAppCheckResponse)
+async def check_dapp_reputation(request: DAppCheckRequest):
     """
-    Check security status across multiple user wallets
-    Used for cross-wallet threat detection
+    Check DApp safety using AI analysis and community intelligence
     """
     try:
         if not security_agent:
-            raise HTTPException(status_code=503, detail="Security agent not initialized")
+            raise HTTPException(status_code=503, detail="AI Security agent not initialized")
         
-        logger.info(f"🔍 Checking multi-wallet status for user {request.user_id}")
+        logger.info(f"🔍 Checking DApp reputation: {request.dapp_name or request.dapp_url}")
         
-        wallet_statuses = {}
-        total_threats = 0
-        quarantine_items = 0
-        cross_wallet_patterns = []
-        
-        # Analyze each wallet
-        for wallet_address in request.wallet_addresses:
-            try:
-                # Get wallet security status
-                behavior_result = await security_agent.sensor.behavior_analyzer.analyze_wallet_behavior(wallet_address)
-                
-                wallet_status = {
-                    "risk_level": "low",
-                    "anomaly_score": behavior_result.get('anomaly_score', 0),
-                    "threats_detected": behavior_result.get('anomalies_found', 0),
-                    "last_analyzed": datetime.now().isoformat(),
-                    "status": "monitored"
-                }
-                
-                # Determine risk level
-                risk_score = behavior_result.get('anomaly_score', 0)
-                if risk_score > 0.7:
-                    wallet_status["risk_level"] = "high"
-                elif risk_score > 0.4:
-                    wallet_status["risk_level"] = "medium"
-                
-                wallet_statuses[wallet_address] = wallet_status
-                total_threats += wallet_status["threats_detected"]
-                
-            except Exception as e:
-                logger.warning(f"Failed to analyze wallet {wallet_address}: {e}")
-                wallet_statuses[wallet_address] = {
-                    "risk_level": "unknown",
-                    "anomaly_score": 0,
-                    "threats_detected": 0,
-                    "last_analyzed": datetime.now().isoformat(),
-                    "status": "error",
-                    "error": str(e)
-                }
-        
-        # Determine overall risk level
-        max_risk_score = max([w.get('anomaly_score', 0) for w in wallet_statuses.values()])
-        if max_risk_score > 0.7:
-            overall_risk = "high"
-        elif max_risk_score > 0.4:
-            overall_risk = "medium"
-        else:
-            overall_risk = "low"
-        
-        # Generate recommendations
-        recommendations = []
-        if overall_risk == "high":
-            recommendations.extend([
-                "Immediate security review recommended",
-                "Consider temporarily limiting high-value transactions",
-                "Review recent activity across all wallets"
-            ])
-        elif overall_risk == "medium":
-            recommendations.extend([
-                "Monitor wallet activity closely",
-                "Verify legitimacy of recent transactions"
-            ])
-        else:
-            recommendations.append("All wallets appear secure")
-        
-        response = MultiWalletStatusResponse(
-            overall_risk_level=overall_risk,
-            total_threats_detected=total_threats,
-            active_quarantine_items=quarantine_items,
-            wallet_statuses=wallet_statuses,
-            cross_wallet_patterns=cross_wallet_patterns,
-            recommendations=recommendations
+        # Use SecuritySensor's DApp analysis
+        dapp_analysis = await security_agent.sensor.analyze_dapp_reputation(
+            request.dapp_url, 
+            request.dapp_name
         )
         
-        logger.info(f"✅ Multi-wallet status check complete: {overall_risk} risk")
+        # Convert to API response format
+        recommendations = []
+        if dapp_analysis['status'] == 'safe':
+            recommendations.append("DApp appears safe to use")
+        elif dapp_analysis['status'] == 'risky':
+            recommendations.extend([
+                "Avoid using this DApp",
+                "Verify the official URL",
+                "Check community reports before proceeding"
+            ])
+        else:
+            recommendations.extend([
+                "Unknown DApp - exercise caution",
+                "Verify legitimacy through official channels",
+                "Start with small amounts if you choose to proceed"
+            ])
+        
+        response = DAppCheckResponse(
+            status=dapp_analysis['status'],
+            risk_score=dapp_analysis.get('risk_score', 0.5),
+            explanation=dapp_analysis.get('reason', 'DApp analysis completed'),
+            recommendations=recommendations,
+            analysis_details=dapp_analysis.get('details', {})
+        )
+        
+        logger.info(f"✅ DApp check complete: {response.status}")
         return response
         
     except Exception as e:
-        logger.error(f"❌ Multi-wallet status check failed: {e}")
+        logger.error(f"❌ DApp check failed: {e}")
+        return DAppCheckResponse(
+            status="error",
+            risk_score=0.5,
+            explanation=f"Unable to analyze DApp: {str(e)}",
+            recommendations=["Could not verify DApp safety - proceed with extreme caution"],
+            analysis_details={"error": str(e)}
+        )
+
+# ========== CONVERSATIONAL AI ENDPOINT ==========
+
+@app.post("/api/v1/user-query", response_model=UserQueryResponse)
+async def handle_user_query(request: UserQueryRequest):
+    """
+    Handle natural language user requests like 'analyze this contract'
+    """
+    try:
+        if not security_agent:
+            raise HTTPException(status_code=503, detail="AI Security agent not initialized")
+        
+        logger.info(f"💬 Processing user query: {request.user_message[:50]}...")
+        
+        # Use SecurityAgent's conversational interface
+        response_text = await security_agent.handle_user_request(
+            request.user_message, 
+            {
+                'user_id': request.user_id,
+                'language': request.user_language,
+                **request.context
+            }
+        )
+        
+        # Check if any action was taken (like starting monitoring)
+        action_taken = None
+        if "tracking" in response_text.lower() or "monitoring" in response_text.lower():
+            action_taken = "monitoring_started"
+        elif "analysis" in response_text.lower():
+            action_taken = "analysis_performed"
+        
+        response = UserQueryResponse(
+            response=response_text,
+            action_taken=action_taken,
+            analysis_performed=None  # Could include analysis details if performed
+        )
+        
+        logger.info(f"✅ User query processed")
+        return response
+        
+    except Exception as e:
+        logger.error(f"❌ User query failed: {e}")
+        return UserQueryResponse(
+            response=f"I'm sorry, I couldn't process your request: {str(e)}. Please try again or contact support.",
+            action_taken=None,
+            analysis_performed=None
+        )
+
+# ========== INCOMING TRANSACTION PROCESSING ==========
+
+@app.post("/api/v1/process-incoming")
+async def process_incoming_transaction(
+    request: TransactionRequest,
+    x_api_key: Optional[str] = Header(None)
+):
+    """
+    Process incoming transactions for quarantine decisions
+    """
+    try:
+        if not security_agent:
+            raise HTTPException(status_code=503, detail="AI Security agent not initialized")
+        
+        logger.info(f"📥 Processing incoming transaction for {request.user_id}")
+        
+        # Prepare transaction data
+        transaction_data = {
+            "hash": request.transaction_hash or f"incoming_{datetime.now().timestamp()}",
+            "from_address": request.from_address,
+            "to_address": request.to_address,
+            "value": request.amount or 0,
+            "token_name": request.token_name,
+            "token_address": request.token_address,
+            "direction": "incoming",
+            "analysis_type": "quarantine_assessment",
+            "user_id": request.user_id,
+            "wallet_provider": request.wallet_provider
+        }
+        
+        # Use SecuritySensor's incoming transaction processing
+        analysis_result = await security_agent.sensor.process_incoming_transaction(
+            transaction_data, 
+            request.user_language
+        )
+        
+        return {
+            "quarantine_recommended": analysis_result.get('quarantine_recommended', False),
+            "risk_score": analysis_result.get('risk_score', 0.0),
+            "explanation": analysis_result.get('user_explanation', 'Transaction processed'),
+            "action": analysis_result.get('action', 'ALLOW'),
+            "analysis_details": analysis_result
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Incoming transaction processing failed: {e}")
+        return {
+            "quarantine_recommended": True,  # Safe default
+            "risk_score": 0.8,
+            "explanation": f"Processing error - quarantined for safety: {str(e)}",
+            "action": "QUARANTINE",
+            "error": str(e)
+        }
+
+# ========== WALLET STATUS ENDPOINT ==========
+
+@app.get("/api/v1/wallet-status/{wallet_address}")
+async def get_wallet_security_status(wallet_address: str):
+    """
+    Get comprehensive security status for a wallet
+    """
+    try:
+        if not security_agent:
+            raise HTTPException(status_code=503, detail="AI Security agent not initialized")
+        
+        # Get security status from sensor
+        security_status = security_agent.sensor.get_security_status()
+        
+        # Add wallet-specific information
+        wallet_status = {
+            "wallet_address": wallet_address,
+            "security_score": security_status.get('security_score', 0.8),
+            "threats_detected_24h": security_status.get('total_threats_detected', 0),
+            "ai_protection_active": security_status.get('ai_agent_connected', False),
+            "monitoring_active": security_status.get('monitoring_active', False),
+            "last_analysis": security_status.get('last_analysis', ''),
+            "protection_modules": security_status.get('modules_loaded', ''),
+            "analysis_method": security_status.get('analysis_method', 'ai_code_generation')
+        }
+        
+        return wallet_status
+        
+    except Exception as e:
+        logger.error(f"❌ Wallet status check failed: {e}")
         raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
 
-@app.get("/api/v1/health")
+# ========== HEALTH CHECK ==========
+
+@app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {
-        "status": "healthy",
-        "security_agent_ready": security_agent is not None,
+        "status": "healthy" if security_agent else "unhealthy",
+        "ai_agent_initialized": security_agent is not None,
         "timestamp": datetime.now().isoformat(),
-        "version": "1.0.0"
+        "version": "2.0.0",
+        "analysis_method": "ai_code_generation"
     }
 
-@app.get("/api/v1/stats")
-async def get_stats():
-    """Get API usage statistics"""
+# ========== ERROR HANDLERS ==========
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """Global exception handler for safety"""
+    logger.error(f"❌ Unhandled exception: {exc}")
+    
     return {
-        "total_transactions_analyzed": 0,  # TODO: Implement counter
-        "blocked_transactions": 0,
-        "warnings_issued": 0,
-        "average_analysis_time_ms": 0,
-        "uptime_seconds": 0
+        "action": "BLOCK",
+        "risk_score": 1.0,
+        "explanation": "Security system error - transaction blocked for safety",
+        "error": str(exc),
+        "status": "error"
     }
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
