@@ -121,7 +121,7 @@ class ContainerManager:
 		# logger.info(f"Writing file {temp_file_name} into host machine")
 		host_path = self.host_cache_folder / f"temp_codes_{postfix}/{temp_file_name}"
 		host_path.parent.mkdir(parents=True, exist_ok=True)
-		host_path.write_text(code)
+		host_path.write_text(code, encoding='utf-8')
 
 		# Create a tar archive in memory
 		tar_stream = io.BytesIO()

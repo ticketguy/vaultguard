@@ -75,28 +75,32 @@ def fetch_fe_data(type: str):
 
 
 def fetch_default_prompt(fe_data, type: str):
-	# Get default prompts for security only
-	input_data = fe_data.copy()
-	
-	# Only support security type
-	if type != "security":
-		logger.warning(f"Unsupported agent type: {type}. Using security defaults.")
-		type = "security"
-	
-	default_prompts = SecurityPromptGenerator.get_default_prompts()
-	
-	try:
-		logger.info(f"Available default prompts: {list(default_prompts.keys())}")
+    # Get default prompts for security only
+    input_data = fe_data.copy()
+    
+    # Only support security type
+    if type != "security":
+        logger.warning(f"Unsupported agent type: {type}. Using security defaults.")
+        type = "security"
+    
+    default_prompts = SecurityPromptGenerator.get_default_prompts()
+    
+    try:
+        logger.info(f"Available default prompts: {list(default_prompts.keys())}")
 
-		# Only fill in missing prompts from defaults
-		missing_prompts = set(default_prompts.keys()) - set(
-			input_data["prompts"].keys()
-		)
-		if missing_prompts:
-			logger.info(f"Adding missing default prompts: {list(missing_prompts)}")
-			for key in missing_prompts:
-				input_data["prompts"][key] = default_prompts[key]
-		return input_data["prompts"]
-	except Exception as e:
-		logger.error(f"Error fetching default prompts: {e}, going with defaults")
-		return default_prompts
+        # Initialize prompts if it doesn't exist
+        if "prompts" not in input_data:
+            input_data["prompts"] = {}
+
+        # Only fill in missing prompts from defaults
+        missing_prompts = set(default_prompts.keys()) - set(
+            input_data["prompts"].keys()
+        )
+        if missing_prompts:
+            logger.info(f"Adding missing default prompts: {list(missing_prompts)}")
+            for key in missing_prompts:
+                input_data["prompts"][key] = default_prompts[key]
+        return input_data["prompts"]
+    except Exception as e:
+        logger.error(f"Error fetching default prompts: {e}, going with defaults")
+        return default_prompts

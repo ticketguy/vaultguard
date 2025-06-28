@@ -38,7 +38,9 @@ class SecurityPromptGenerator:
             if prompt not in prompts:
                 prompts[prompt] = f"Default {prompt} prompt for security analysis"
 
-    def get_default_prompts(self) -> Dict[str, str]:
+
+    @staticmethod
+    def get_default_prompts() -> Dict[str, str]:
         """Get default security prompts"""
         return {
             'system': dedent("""
@@ -546,6 +548,183 @@ ONLY return the explanation text, no code or extra formatting.
                 return f"⚠️ WARNING: Moderate security risk detected ({risk_score:.0%}). Please review carefully before proceeding."
             else:
                 return f"✅ SAFE: Low security risk ({risk_score:.0%}). Transaction appears legitimate."
+
+    def gen_analysis_code_on_first(self, apis: List[str], network: str) -> Tuple[Result[str, str], ChatHistory]:
+        """Generate initial security analysis code for first-time monitoring"""
+        
+        try:
+            # Generate prompt for first-time analysis  
+            prompt = self.prompt_generator.prompts['analysis_code_on_first_prompt'].format(
+                apis_str="\n".join(apis),
+                network=network
+            )
+            
+            # Create instruction message
+            instruction_message = Message(role="user", content=prompt)
+            
+            # Create chat history and add message (use messages.append directly)
+            chat_history = ChatHistory()
+            chat_history.messages.append(instruction_message)
+            
+            # Generate AI response using correct method
+            response_result = self.genner.ch_completion(chat_history)
+            
+            if response_result.is_err():
+                return Err(f"AI generation failed: {response_result.unwrap_err()}"), ChatHistory()
+            
+            response = response_result.unwrap()
+            
+            # Add response to chat history
+            chat_history.messages.append(Message(role="assistant", content=response))
+            
+            return Ok(response), chat_history
+            
+        except Exception as e:
+            error_msg = f"Failed to generate initial analysis code: {str(e)}"
+            return Err(error_msg), ChatHistory()
+
+    def regen_on_error(self, errors: str, latest_response: str) -> Result[str, str]:
+        """Regenerate code when errors occur"""
+        
+        try:
+            # Generate prompt for error correction
+            prompt = self.prompt_generator.prompts['regen_code_prompt'].format(
+                errors=errors,
+                previous_code=latest_response
+            )
+            
+            # Create instruction message
+            instruction_message = Message(role="user", content=prompt)
+            
+            # Create chat history and add message
+            chat_history = ChatHistory() 
+            chat_history.messages.append(instruction_message)
+            
+            # Generate AI response using correct method
+            response_result = self.genner.ch_completion(chat_history)
+            
+            if response_result.is_err():
+                return Err(f"AI regeneration failed: {response_result.unwrap_err()}")
+            
+            response = response_result.unwrap()
+            
+            return Ok(response)
+            
+        except Exception as e:
+            return Err(f"Failed to regenerate code: {str(e)}")
+
+    def gen_analysis_code(self, notifications_str: str, apis: List[str], prev_analysis: str, 
+                        rag_summary: str, before_metric_state: str, after_metric_state: str) -> Tuple[Result[str, str], ChatHistory]:
+        """Generate security analysis code based on notifications and context"""
+        
+        try:
+            # Generate prompt 
+            prompt = self.prompt_generator.generate_analysis_code_prompt(
+                notifications_str=notifications_str,
+                apis_str="\n".join(apis),
+                prev_analysis=prev_analysis,
+                rag_summary=rag_summary,
+                before_metric_state=before_metric_state,
+                after_metric_state=after_metric_state
+            )
+            
+            # Create instruction message
+            instruction_message = Message(role="user", content=prompt)
+            
+            # Create chat history and add message
+            chat_history = ChatHistory()
+            chat_history.messages.append(instruction_message)
+            
+            # Generate AI response
+            response_result = self.genner.ch_completion(chat_history)
+            
+            if response_result.is_err():
+                return Err(f"AI generation failed: {response_result.unwrap_err()}"), ChatHistory()
+            
+            response = response_result.unwrap()
+            
+            # Add response to chat history
+            chat_history.messages.append(Message(role="assistant", content=response))
+            
+            return Ok(response), chat_history
+            
+        except Exception as e:
+            error_msg = f"Failed to generate analysis code: {str(e)}"
+            return Err(error_msg), ChatHistory()
+
+    def gen_security_strategy(self, analysis_results: str, apis: List[str], before_metric_state: str, 
+                            network: str, time: str) -> Tuple[Result[str, str], ChatHistory]:
+        """Generate security strategy based on analysis results"""
+        
+        try:
+            # Generate prompt 
+            prompt = self.prompt_generator.generate_strategy_prompt(
+                analysis_results=analysis_results,
+                apis_str="\n".join(apis),
+                before_metric_state=before_metric_state,
+                network=network,
+                time=time
+            )
+            
+            # Create instruction message
+            instruction_message = Message(role="user", content=prompt)
+            
+            # Create chat history and add message
+            chat_history = ChatHistory()
+            chat_history.messages.append(instruction_message)
+            
+            # Generate AI response
+            response_result = self.genner.ch_completion(chat_history)
+            
+            if response_result.is_err():
+                return Err(f"AI generation failed: {response_result.unwrap_err()}"), ChatHistory()
+            
+            response = response_result.unwrap()
+            
+            # Add response to chat history
+            chat_history.messages.append(Message(role="assistant", content=response))
+            
+            return Ok(response), chat_history
+            
+        except Exception as e:
+            error_msg = f"Failed to generate security strategy: {str(e)}"
+            return Err(error_msg), ChatHistory()
+
+    def gen_quarantine_code(self, strategy_output: str, apis: List[str], metric_state: str,
+                        security_tools: List[str], meta_swap_api_url: str, network: str) -> Tuple[Result[str, str], ChatHistory]:
+        """Generate quarantine implementation code"""
+        
+        try:
+            # Generate prompt 
+            prompt = self.prompt_generator.generate_quarantine_code_prompt(
+                strategy_output=strategy_output,
+                apis_str="\n".join(apis),
+                before_metric_state=metric_state
+            )
+            
+            # Create instruction message
+            instruction_message = Message(role="user", content=prompt)
+            
+            # Create chat history and add message
+            chat_history = ChatHistory()
+            chat_history.messages.append(instruction_message)
+            
+            # Generate AI response
+            response_result = self.genner.ch_completion(chat_history)
+            
+            if response_result.is_err():
+                return Err(f"AI generation failed: {response_result.unwrap_err()}"), ChatHistory()
+            
+            response = response_result.unwrap()
+            
+            # Add response to chat history
+            chat_history.messages.append(Message(role="assistant", content=response))
+            
+            return Ok(response), chat_history
+            
+        except Exception as e:
+            error_msg = f"Failed to generate quarantine code: {str(e)}"
+            return Err(error_msg), ChatHistory()
 
     # ========== CONVERSATIONAL INTERFACE ==========
 
