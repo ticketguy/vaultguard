@@ -1,6 +1,6 @@
 """
 Updated Starter Script with Background Intelligence Monitor
-Integrates 24/7 threat monitoring with existing SecurityAgent system
+Uses generic RPC provider naming - works with Helius, QuickNode, Alchemy, Custom RPCs
 """
 
 import asyncio
@@ -18,6 +18,7 @@ from src.sensor.security import SecuritySensor
 from src.sensor.interface import SecuritySensorInterface
 from src.db import DBInterface
 from typing import Callable
+from src.rpc_config import FlexibleRPCConfig
 from src.agent.security import SecurityAgent, SecurityPromptGenerator
 from src.datatypes import StrategyData
 from src.container import ContainerManager
@@ -45,7 +46,7 @@ load_dotenv()
 
 # Security agent default configuration
 FE_DATA_SECURITY_DEFAULTS = {
-    "agent_name": "default_security_name",
+    "agent_name": "",
     "type": "security",
     "model": "claude",
     "mode": "default",
@@ -252,9 +253,13 @@ async def run_cycle_with_background_monitor(
 
 
 def setup_security_sensor() -> SecuritySensorInterface:
-    """Initialize Solana blockchain security sensor with real-time monitoring capability"""
-    HELIUS_API_KEY = os.environ.get("HELIUS_API_KEY")
-    SOLANA_RPC_URL = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+    """Initialize Solana blockchain security sensor with flexible RPC configuration"""
+    
+    # Initialize flexible RPC configuration
+    rpc_config = FlexibleRPCConfig()
+    
+    # Get optimal RPC configuration (now returns API key too)
+    primary_url, provider_name, all_endpoints, api_key = rpc_config.detect_and_configure_rpc()
     
     # Get monitored wallet addresses from environment
     monitored_wallets = []
@@ -275,11 +280,27 @@ def setup_security_sensor() -> SecuritySensorInterface:
     for wallet in monitored_wallets:
         logger.info(f"   📡 Monitoring: {wallet[:8]}...{wallet[-8:]}")
     
+    logger.info(f"🚀 Primary RPC: {provider_name}")
+    if api_key:
+        logger.info(f"🔑 API key configured for enhanced rate limits")
+    logger.info(f"🔄 Total endpoints available: {len(all_endpoints)}")
+    
+    # Create SecuritySensor with flexible configuration
     sensor = SecuritySensor(
         wallet_addresses=monitored_wallets,
-        solana_rpc_url=SOLANA_RPC_URL,
-        helius_api_key=HELIUS_API_KEY or "",
+        solana_rpc_url=primary_url,
+        rpc_api_key=api_key,  # Generic API key for any provider
+        rpc_provider_name=provider_name,  # Clear provider name
     )
+    
+    # Print detailed configuration summary
+    config_summary = rpc_config.get_configuration_summary()
+    logger.info(f"📊 RPC Configuration Summary:")
+    logger.info(f"   🎯 Method: {config_summary['configuration_method']}")
+    logger.info(f"   🔑 Detected providers: {', '.join(config_summary['detected_providers']) if config_summary['detected_providers'] else 'None'}")
+    logger.info(f"   🔐 API key status: {'Configured' if config_summary['api_key_configured'] else 'Not configured'}")
+    logger.info(f"   🔄 Fallback endpoints: {len(config_summary['fallback_rpcs'])}")
+    
     return sensor
 
 
@@ -305,6 +326,7 @@ def extra_background_monitor_questions():
     else:
         logger.info("📊 Using real-time analysis only")
         return False
+
 
 def extra_research_tools_questions(answer_research_tools):
     """Prompt for API keys needed by selected research tools"""
@@ -367,36 +389,61 @@ def extra_model_questions(answer_model):
 
 
 def extra_sensor_questions():
-    """Configure security sensor for Solana monitoring with real-time protection"""
-    sensor_api_keys = ["HELIUS_API_KEY", "SOLANA_RPC_URL"]
+    """Configure security sensor for Solana monitoring with flexible RPC support"""
+    # Updated to use generic RPC terminology
+    rpc_providers = ["Any Solana RPC Provider (Helius, QuickNode, Alchemy, Custom)"]
     question_security_sensor = [
         inquirer.List(
             name="sensor",
-            message=f"Do you have these API keys {', '.join(sensor_api_keys)} for real-time monitoring?",
+            message=f"Do you have RPC API access for real-time monitoring?",
             choices=[
                 "No, I'm using Mock Security Sensor for now",
-                "Yes, i have these keys for real-time protection",
+                "Yes, I have RPC API keys for real-time protection",
             ],
         )
     ]
     answer_security_sensor = inquirer.prompt(question_security_sensor)
-    if answer_security_sensor["sensor"] == "Yes, i have these keys for real-time protection":
-        sensor_api_keys = [x for x in sensor_api_keys if not os.getenv(x)]
-        question_sensor_api_keys = [
-            inquirer.Text(
-                name=x, message=f"Please enter value for this variable {x}"
-            )
-            for x in sensor_api_keys
-            if not os.getenv(x)
+    if answer_security_sensor["sensor"] == "Yes, I have RPC API keys for real-time protection":
+        # Generic RPC configuration - works with any provider
+        potential_rpc_keys = [
+            "HELIUS_API_KEY", 
+            "QUICKNODE_API_KEY", 
+            "ALCHEMY_API_KEY",
+            "CUSTOM_SOLANA_API_KEY",
+            "SOLANA_RPC_URL"
         ]
-        if question_sensor_api_keys:
-            answer_sensor_api_keys = inquirer.prompt(question_sensor_api_keys)
-            for x in sensor_api_keys:
-                if x in answer_sensor_api_keys:
-                    os.environ[x] = answer_sensor_api_keys[x]
+        
+        missing_keys = [key for key in potential_rpc_keys if not os.getenv(key)]
+        
+        if missing_keys:
+            logger.info("💡 RPC Configuration Options:")
+            logger.info("   🔸 Set HELIUS_API_KEY for Helius RPC")
+            logger.info("   🔸 Set QUICKNODE_API_KEY for QuickNode RPC") 
+            logger.info("   🔸 Set ALCHEMY_API_KEY for Alchemy RPC")
+            logger.info("   🔸 Set CUSTOM_SOLANA_RPC_URL + CUSTOM_SOLANA_API_KEY for custom RPC")
+            logger.info("   🔸 Set SOLANA_RPC_URL for any RPC endpoint")
+            
+            configure_rpc = inquirer.confirm("Configure RPC settings now?", default=True)
+            if configure_rpc:
+                questions_rpc = []
+                for key in ["SOLANA_RPC_URL", "HELIUS_API_KEY"]:  # Ask for the most common ones
+                    if not os.getenv(key):
+                        questions_rpc.append(
+                            inquirer.Text(
+                                name=key, 
+                                message=f"Enter {key} (optional - leave blank to skip)",
+                                default=""
+                            )
+                        )
+                
+                if questions_rpc:
+                    answers_rpc = inquirer.prompt(questions_rpc)
+                    for key, value in answers_rpc.items():
+                        if value.strip():  # Only set if not empty
+                            os.environ[key] = value.strip()
         
         sensor = setup_security_sensor()
-        logger.info("🚀 Real-time SecuritySensor configured!")
+        logger.info("🚀 Real-time SecuritySensor configured with flexible RPC!")
         return sensor
     else:
         logger.info("📊 Using Mock SecuritySensor for testing")
@@ -406,7 +453,7 @@ def extra_sensor_questions():
 def extra_rag_questions(answer_rag):
     """Configure RAG client"""
     if answer_rag == "Yes, i have setup the RAG":
-            # RAGClient expects agent_id as first parameter
+        # RAGClient expects agent_id as first parameter
         agent_id = f"security_agent_{int(time.time())}"
         
         try:
@@ -452,7 +499,7 @@ def starter_prompt():
     
     # Only ask the essentials
     questions = [
-        inquirer.Text("agent_name", message="What's the name of your security agent?", default="SecurityAgent"),
+        inquirer.Text("agent_name", message="What's the name of your security agent?", default=""),
         inquirer.List(
             name="model",
             message="Which AI model do you want to use?",
@@ -574,12 +621,17 @@ def auto_configure_api_keys(research_tools):
 
 
 def auto_detect_sensor():
-    """Auto-detect sensor capabilities"""
-    if os.getenv("HELIUS_API_KEY") or os.getenv("SOLANA_RPC_URL"):
-        logger.info("🛡️ Real-time sensor available")
+    """Auto-detect sensor capabilities with flexible RPC support"""
+    rpc_config = FlexibleRPCConfig()
+    detected_providers = rpc_config._get_detected_providers()
+
+    if detected_providers or os.getenv("CUSTOM_SOLANA_RPC_URL") or os.getenv("SOLANA_RPC_URL"):
+        provider_names = ', '.join(detected_providers) if detected_providers else 'configured RPC'
+        logger.info(f"🛡️ Real-time sensor available with {provider_names}")
         return setup_security_sensor()
     else:
-        logger.info("📊 Using Mock sensor (add HELIUS_API_KEY for real-time protection)")
+        logger.info("📊 Using Mock sensor (add RPC configuration for real-time protection)")
+        logger.info("💡 Supported providers: Helius, QuickNode, Alchemy, Custom RPCs")
         return MockSecuritySensor(["demo_wallet"], "mock_rpc", "mock_key")
 
 

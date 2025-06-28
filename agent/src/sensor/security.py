@@ -54,7 +54,7 @@ except ImportError:
     DeepPatternAnalyzer = None
 
 try:
-    from analysis.solana_rpc_client import SolanaRPCClient
+    from analysis.solana_rpc_client import IntelligentSolanaRPCClient as SolanaRPCClient
 except ImportError:
     SolanaRPCClient = None
 
@@ -65,11 +65,12 @@ class SecuritySensor:
     and coordinates with SecurityAgent for AI-driven analysis
     """
     
-    def __init__(self, wallet_addresses: List[str], solana_rpc_url: str, helius_api_key: str = ""):
+    def __init__(self, wallet_addresses: List[str], solana_rpc_url: str, rpc_api_key: str = "", rpc_provider_name: str = "Unknown"):
         # Core connection parameters
         self.wallet_addresses = wallet_addresses
         self.solana_rpc_url = solana_rpc_url
-        self.helius_api_key = helius_api_key
+        self.rpc_api_key = rpc_api_key  # Generic API key for any RPC provider
+        self.rpc_provider_name = rpc_provider_name  # Name of the RPC provider
         
         # Initialize your existing analysis modules with correct imports
         self.community_db = AdaptiveCommunityDatabase() if AdaptiveCommunityDatabase else None
@@ -81,7 +82,16 @@ class SecuritySensor:
         self.behavior_analyzer = BehaviorAnalyzer() if BehaviorAnalyzer else None
         self.network_analyzer = NetworkAnalyzer() if NetworkAnalyzer else None
         self.pattern_analyzer = DeepPatternAnalyzer() if DeepPatternAnalyzer else None
-        self.solana_client = SolanaRPCClient() if SolanaRPCClient else None
+        
+        if SolanaRPCClient:
+            self.solana_client = SolanaRPCClient(
+                helius_api_key=self.rpc_api_key,  # Pass any provider's API key (parameter name is legacy)
+                primary_rpc_url=self.solana_rpc_url
+            )
+            print(f"🔄 Intelligent RPC client initialized with {len(self.solana_client.endpoints) if hasattr(self.solana_client, 'endpoints') else 'multiple'} endpoints")
+            print(f"🚀 Primary RPC provider: {self.rpc_provider_name}")
+        else:
+            self.solana_client = None
         
         # Track security state
         self.last_analysis_time = datetime.now()
@@ -98,6 +108,22 @@ class SecuritySensor:
         
         print(f"🛡️ SecuritySensor initialized for {len(wallet_addresses)} wallets")
         print(f"📊 Analysis modules loaded: {self._get_loaded_modules()}")
+
+    def get_rpc_health(self) -> Dict[str, Any]:
+        """Get RPC endpoint health status for monitoring rate limiting"""
+        if self.solana_client and hasattr(self.solana_client, 'get_endpoint_health'):
+            health = self.solana_client.get_endpoint_health()
+            return {
+                'rpc_health': health,
+                'current_endpoint': health.get('current_endpoint', 'unknown'),
+                'total_requests': health.get('total_requests', 0),
+                'success_rate': health.get('total_successes', 0) / max(health.get('total_requests', 1), 1)
+            }
+        else:
+            return {
+                'rpc_health': 'not_available',
+                'status': 'basic_client_or_none'
+            }
 
     def _get_loaded_modules(self) -> str:
         """Get list of successfully loaded analysis modules"""
@@ -138,6 +164,7 @@ class SecuritySensor:
             # Add sensor-specific context
             analysis_result['sensor_modules_used'] = self._get_loaded_modules()
             analysis_result['analysis_method'] = 'ai_code_generation'
+            analysis_result['rpc_provider'] = self.rpc_provider_name
             
             return analysis_result
             
@@ -325,16 +352,15 @@ class SecuritySensor:
             'user_explanation': f'Basic analysis only: {error_reason}. Transaction flagged for manual review.',
             'chain_of_thought': [f'⚠️ Fallback analysis: {error_reason}'],
             'analysis_method': 'fallback',
-            'quarantine_recommended': True  # Conservative approach
+            'quarantine_recommended': True,  # Conservative approach
+            'rpc_provider': self.rpc_provider_name
         }
 
     # ========== LEGACY COMPATIBILITY METHODS ==========
 
     def get_security_status(self) -> Dict[str, Any]:
-        """
-        Get current security status - compatible with existing framework
-        """
-        return {
+        """Get current security status - compatible with existing framework"""
+        base_status = {
             "security_score": 0.8,
             "total_threats_detected": len(self.threat_cache),
             "quarantined_items": 0,
@@ -343,8 +369,20 @@ class SecuritySensor:
             "modules_loaded": self._get_loaded_modules(),
             "monitoring_active": self.monitoring_active,
             "ai_agent_connected": self.security_agent is not None,
-            "analysis_method": "ai_code_generation"
+            "analysis_method": "ai_code_generation",
+            "rpc_provider": self.rpc_provider_name,
+            "api_key_configured": bool(self.rpc_api_key)
         }
+        
+        # Add RPC health info
+        rpc_health = self.get_rpc_health()
+        base_status.update({
+            "rpc_status": rpc_health.get('current_endpoint', 'unknown'),
+            "rpc_success_rate": f"{rpc_health.get('success_rate', 0):.1%}",
+            "total_rpc_requests": rpc_health.get('total_requests', 0)
+        })
+        
+        return base_status
 
     def get_transaction_threats(self) -> Dict[str, Any]:
         """Get recent threat detection data"""
@@ -353,7 +391,8 @@ class SecuritySensor:
             "threat_count": len(self.threat_cache),
             "last_scan": int(time.time()),
             "protection_enabled": True,
-            "ai_analysis_available": self.security_agent is not None
+            "ai_analysis_available": self.security_agent is not None,
+            "rpc_provider": self.rpc_provider_name
         }
 
     def get_metric_fn(self, metric_name: str = "security") -> callable:
@@ -361,7 +400,7 @@ class SecuritySensor:
         if metric_name == "security":
             return lambda: self.get_security_status()
         else:
-            return lambda: {"metric": metric_name, "value": 0.5}
+            return lambda: {"metric": metric_name, "value": 0.5, "rpc_provider": self.rpc_provider_name}
 
     # ========== DIRECT MODULE ACCESS (For specific analysis) ==========
 

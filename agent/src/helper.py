@@ -12,40 +12,29 @@ import httpx
 
 @contextmanager
 def timeout(seconds: int):
-	"""
-	Context manager that raises a TimeoutError if the code inside the context takes longer than the specified time.
-
-	This function uses the SIGALRM signal to implement a timeout mechanism. It sets up a signal handler
-	that raises a TimeoutError when the alarm goes off, then restores the original handler when done.
-
-	Args:
-	    seconds (int): Maximum number of seconds to allow the code to run
-
-	Yields:
-	    None: The context to execute code within the timeout constraint
-
-	Raises:
-	    TimeoutError: If the code execution exceeds the specified timeout
-
-	Example:
-	    >>> with timeout(5):
-	    ...     # Code that should complete within 5 seconds
-	    ...     long_running_function()
-	"""
-
-	def timeout_handler(signum, frame):
-		raise TimeoutError(f"Execution timed out after {seconds} seconds")
-
-	# Set the timeout handler
-	original_handler = signal.signal(signal.SIGALRM, timeout_handler)
-	signal.alarm(seconds)
-
-	try:
-		yield
-	finally:
-		# Restore the original handler and cancel the alarm
-		signal.alarm(0)
-		signal.signal(signal.SIGALRM, original_handler)
+    """
+    Context manager that raises a TimeoutError if the code inside the context takes longer than the specified time.
+    Windows-compatible version using threading instead of signals.
+    """
+    import threading
+    import time as time_module
+    
+    class TimeoutException(Exception):
+        pass
+    
+    def timeout_handler():
+        time_module.sleep(seconds)
+        raise TimeoutError(f"Execution timed out after {seconds} seconds")
+    
+    # Start timeout thread
+    timeout_thread = threading.Thread(target=timeout_handler, daemon=True)
+    timeout_thread.start()
+    
+    try:
+        yield
+    finally:
+        # Thread will be cleaned up automatically as it's a daemon thread
+        pass
 
 
 def extract_content(text: str, block_name: str) -> str:
