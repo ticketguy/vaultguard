@@ -20,6 +20,40 @@ from src.datatypes import (
 from src.helper import nanoid
 from src.types import ChatHistory
 
+# Add this function at the top of the file
+def extract_python_code(ai_response: str) -> str:
+    """Extract only executable Python code from AI response"""
+    import re
+    
+    # Extract code from markdown blocks
+    code_block_pattern = r'```(?:python)?\s*\n(.*?)\n```'
+    matches = re.findall(code_block_pattern, ai_response, re.DOTALL)
+    
+    if matches:
+        return matches[0].strip()
+    
+    # Extract code starting from first import/def
+    lines = ai_response.split('\n')
+    code_started = False
+    extracted_lines = []
+    
+    for line in lines:
+        if not code_started:
+            if (line.strip().startswith(('import ', 'from ', 'def ', 'class ', '#!')) or
+                'load_dotenv' in line):
+                code_started = True
+                extracted_lines.append(line)
+        else:
+            if (line.strip().startswith(('Note:', 'This code', 'Below is')) and
+                not line.strip().startswith('#')):
+                break
+            extracted_lines.append(line)
+    
+    if extracted_lines:
+        return '\n'.join(extracted_lines).strip()
+    
+    return ai_response.strip()
+
 
 def assisted_flow(
 	agent: SecurityAgent,
@@ -196,6 +230,8 @@ def assisted_flow(
 			for_training_chat_history += new_ch
 
 			logger.info("Running the resulting security analysis code in container...")
+			# 🔧 FIX 1: Extract Python code before execution
+			analysis_code = extract_python_code(analysis_code)
 			code_execution_result = agent.container_manager.run_code_in_con(
 				analysis_code, "security_analysis_code"
 			)
@@ -292,6 +328,8 @@ def assisted_flow(
 			for_training_chat_history += new_ch
 
 			logger.info("Running threat intelligence research code in container...")
+			# 🔧 FIX 2: Extract Python code before execution
+			threat_research_output = extract_python_code(threat_research_output)
 			code_execution_result = agent.container_manager.run_code_in_con(
 				threat_research_output, "threat_intelligence_research"
 			)
@@ -351,6 +389,8 @@ def assisted_flow(
 			for_training_chat_history += new_ch
 
 			logger.info("Running the resulting security implementation code in container...")
+			# 🔧 FIX 3: Extract Python code before execution
+			quarantine_code = extract_python_code(quarantine_code)
 			code_execution_result = agent.container_manager.run_code_in_con(
 				quarantine_code, "security_implementation_code"
 			)
@@ -533,6 +573,8 @@ def unassisted_flow(
 			agent.chat_history += new_ch
 
 			logger.info("Running the resulting security analysis code in container...")
+			# ✅ Already fixed: Extract Python code before execution
+			analysis_code = extract_python_code(analysis_code)
 			code_execution_result = agent.container_manager.run_code_in_con(
 				analysis_code, "unassisted_security_analysis"
 			)
