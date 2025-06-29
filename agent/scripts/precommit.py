@@ -3,12 +3,10 @@ import subprocess
 import hashlib
 
 from pathlib import Path
-from src.agent.marketing import MarketingPromptGenerator
-from src.agent.trading import TradingPromptGenerator
+from src.agent.security import SecurityPromptGenerator
 
 DATA_FOLDER = "./data"
-MARKETING_PROMPT_PATH = "./src/agent/marketing.py"
-TRADING_PROMPT_PATH = "./src/agent/trading.py"
+SECURITY_PROMPT_PATH = "./src/agent/security.py"
 
 
 def check_file_committed(filepath):
@@ -69,26 +67,20 @@ def get_git_info():
 		) from e
 
 
-marketing_default_prompts = MarketingPromptGenerator.get_default_prompts()
-trading_default_prompts = TradingPromptGenerator.get_default_prompts()
+# Only security prompts now
+security_default_prompts = SecurityPromptGenerator.get_default_prompts()
 
 if __name__ == "__main__":
-	check_file_committed(TRADING_PROMPT_PATH)
-	check_file_committed(MARKETING_PROMPT_PATH)
+	check_file_committed(SECURITY_PROMPT_PATH)
 
-	marketing_prompt_hash = hashlib.md5(
-		json.dumps(marketing_default_prompts, sort_keys=True).encode()
-	).hexdigest()
-	trading_prompt_hash = hashlib.md5(
-		json.dumps(trading_default_prompts, sort_keys=True).encode()
+	security_prompt_hash = hashlib.md5(
+		json.dumps(security_default_prompts, sort_keys=True).encode()
 	).hexdigest()
 
 	data = {
-		"trading": trading_default_prompts,
-		"marketing": marketing_default_prompts,
+		"security": security_default_prompts,
 		"git_info": get_git_info(),
-		"marketing_prompt_hash": marketing_prompt_hash,
-		"trading_prompt_hash": trading_prompt_hash,
+		"security_prompt_hash": security_prompt_hash,
 	}
 
 	filepath = Path(DATA_FOLDER) / "prompts.json"

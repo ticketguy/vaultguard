@@ -20,40 +20,178 @@ from src.datatypes import (
 from src.helper import nanoid
 from src.types import ChatHistory
 
-# Add this function at the top of the file
 def extract_python_code(ai_response: str) -> str:
-    """Extract only executable Python code from AI response"""
+    """Final bulletproof extraction - handles all patterns and includes imports"""
     import re
     
-    # Extract code from markdown blocks
+    # Fix Unicode characters first
+    response = ai_response.replace('–', '-').replace('—', '-').replace('"', '"').replace('"', '"')
+    
+    # Look for separator lines (any type: ---- or ════ or ──── )
+    separator_patterns = [r'─{10,}', r'-{10,}', r'={10,}', r'_{10,}']
+    
+    for sep_pattern in separator_patterns:
+        parts = re.split(sep_pattern, response)
+        if len(parts) >= 3:  # Text, Code, Text
+            potential_code = parts[1].strip()
+            if _is_valid_python_code(potential_code):
+                return _complete_python_code(potential_code)
+    
+    # Look for markdown code blocks
     code_block_pattern = r'```(?:python)?\s*\n(.*?)\n```'
-    matches = re.findall(code_block_pattern, ai_response, re.DOTALL)
-    
+    matches = re.findall(code_block_pattern, response, re.DOTALL)
     if matches:
-        return matches[0].strip()
+        for match in matches:
+            cleaned = match.strip()
+            if _is_valid_python_code(cleaned):
+                return _complete_python_code(cleaned)
     
-    # Extract code starting from first import/def
-    lines = ai_response.split('\n')
-    code_started = False
-    extracted_lines = []
+    # Find Python code by scanning line by line
+    lines = response.split('\n')
+    start_idx = None
+    end_idx = len(lines)
     
-    for line in lines:
-        if not code_started:
-            if (line.strip().startswith(('import ', 'from ', 'def ', 'class ', '#!')) or
-                'load_dotenv' in line):
-                code_started = True
-                extracted_lines.append(line)
-        else:
-            if (line.strip().startswith(('Note:', 'This code', 'Below is')) and
-                not line.strip().startswith('#')):
+    # Find start - look for shebang, imports, or main functions
+    for i, line in enumerate(lines):
+        line_stripped = line.strip()
+        if (line_stripped.startswith(('#!/usr/bin/env python', 'import ', 'from ')) or
+            line_stripped.startswith(('def main()', 'def run_', 'def analyze_', 'def check_'))):
+            start_idx = i
+            break
+    
+    # If no clear start, look for any def or class
+    if start_idx is None:
+        for i, line in enumerate(lines):
+            line_stripped = line.strip()
+            if line_stripped.startswith(('def ', 'class ', 'if __name__')):
+                start_idx = i
                 break
-            extracted_lines.append(line)
     
-    if extracted_lines:
-        return '\n'.join(extracted_lines).strip()
+    # Find end - stop at explanatory text
+    if start_idx is not None:
+        for i in range(start_idx + 10, len(lines)):  # Start checking after some lines
+            line_stripped = lines[i].strip()
+            if (line_stripped.startswith(('Usage Notes:', 'How the', 'Chain of', 'This code',
+                                        'The script', 'Before running', 'NOTE:', 'Explanation:',
+                                        'You can extend', 'Install required', 'Set the environment')) and
+                not line_stripped.startswith('#')):
+                end_idx = i
+                break
+            # Stop at separator lines
+            if any(re.match(pattern, line_stripped) for pattern in separator_patterns):
+                end_idx = i
+                break
     
-    return ai_response.strip()
+    # Extract the code
+    if start_idx is not None:
+        code_lines = lines[start_idx:end_idx]
+        code = '\n'.join(code_lines).strip()
+        return _complete_python_code(code)
+    
+    # Last resort - if still contains explanatory text, use fallback
+    if any(phrase in response.lower() for phrase in ['below is', 'here is', 'this code', 'usage notes:', 'how the']):
+        print("⚠️ AI generated explanatory text, using fallback security code")
+        return generate_fallback_security_code()
+    
+    return response.strip()
 
+def _is_valid_python_code(code: str) -> bool:
+    """Check if the text looks like Python code"""
+    if not code or len(code) < 20:
+        return False
+    
+    # Must contain Python keywords
+    python_indicators = ['import ', 'def ', 'print(', 'if ', 'for ', 'class ', 'return ', 'try:']
+    if not any(indicator in code for indicator in python_indicators):
+        return False
+    
+    # Check for shebang or imports at the start
+    lines = code.strip().split('\n')
+    first_few_lines = ' '.join(lines[:5]).lower()
+    if ('#!/usr/bin/env python' in first_few_lines or 
+        'import ' in first_few_lines or 
+        'from ' in first_few_lines):
+        return True
+    
+    # Check for function definitions
+    if any(line.strip().startswith('def ') for line in lines[:10]):
+        return True
+    
+    return False
+
+def _complete_python_code(code: str) -> str:
+    """Ensure the Python code has all necessary imports and structure"""
+    if not code:
+        return code
+    
+    lines = code.split('\n')
+    
+    # Check what imports we need
+    needed_imports = set()
+    
+    # Scan for usage of modules
+    full_code = '\n'.join(lines)
+    if 're.' in full_code or 'regex' in full_code or 'match(' in full_code:
+        needed_imports.add('import re')
+    if 'os.' in full_code or 'getenv' in full_code:
+        needed_imports.add('import os')  
+    if 'json.' in full_code or 'dumps(' in full_code or 'loads(' in full_code:
+        needed_imports.add('import json')
+    if 'time.' in full_code or 'sleep(' in full_code:
+        needed_imports.add('import time')
+    if 'requests.' in full_code or 'get(' in full_code or 'post(' in full_code:
+        needed_imports.add('import requests')
+    if 'logging.' in full_code:
+        needed_imports.add('import logging')
+    if 'load_dotenv' in full_code:
+        needed_imports.add('from dotenv import load_dotenv')
+    
+    # Find existing imports
+    existing_imports = set()
+    import_end_idx = 0
+    
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith(('import ', 'from ')):
+            existing_imports.add(stripped)
+            import_end_idx = i + 1
+        elif stripped.startswith('#!/'):
+            import_end_idx = i + 1
+        elif stripped and not stripped.startswith('#'):
+            break
+    
+    # Add missing imports
+    missing_imports = needed_imports - existing_imports
+    
+    if missing_imports:
+        # Insert missing imports after existing imports
+        new_lines = lines[:import_end_idx]
+        new_lines.extend(sorted(missing_imports))
+        if import_end_idx < len(lines):
+            new_lines.extend([''] + lines[import_end_idx:])
+        lines = new_lines
+    
+    # Ensure proper structure
+    result = '\n'.join(lines).strip()
+    
+    # Add load_dotenv() call if missing but import exists
+    if 'from dotenv import load_dotenv' in result and 'load_dotenv()' not in result:
+        # Find where to insert load_dotenv()
+        result_lines = result.split('\n')
+        insert_idx = 0
+        
+        # Find end of imports
+        for i, line in enumerate(result_lines):
+            if line.strip().startswith(('import ', 'from ')):
+                insert_idx = i + 1
+            elif line.strip() and not line.strip().startswith('#'):
+                break
+        
+        # Insert load_dotenv() call
+        result_lines.insert(insert_idx, '\nload_dotenv()')
+        result = '\n'.join(result_lines)
+    
+    return result
 
 def assisted_flow(
 	agent: SecurityAgent,
