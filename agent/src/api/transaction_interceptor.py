@@ -12,6 +12,7 @@ import json
 from datetime import datetime
 import logging
 import os
+import time
 
 # Simplified imports - only what we need
 from src.agent.security import SecurityAgent, SecurityPromptGenerator
@@ -112,7 +113,10 @@ async def startup_event():
         
         # Initialize RAG client for threat intelligence
         rag_service_url = os.getenv("RAG_SERVICE_URL", "http://localhost:8080")
-        rag = RAGClient(rag_service_url)
+        # Generate unique IDs for this API instance
+        agent_id = f"api_security_agent_{int(time.time())}"
+        session_id = f"api_session_{int(time.time())}"
+        rag = RAGClient(agent_id, session_id, rag_service_url)
         
         # Initialize security sensor with real Solana monitoring
         monitored_wallets = []
@@ -125,10 +129,12 @@ async def startup_event():
         if not monitored_wallets:
             monitored_wallets = ["demo_wallet_1", "demo_wallet_2"]  # Demo wallets
         
+        # FIXED: Use correct SecuritySensor parameters
         sensor = SecuritySensor(
             wallet_addresses=monitored_wallets,
             solana_rpc_url=os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com"),
-            helius_api_key=os.getenv("HELIUS_API_KEY", "")
+            rpc_api_key=os.getenv("HELIUS_API_KEY", ""),  # Fixed parameter name
+            rpc_provider_name="helius"  # Added missing parameter
         )
         
         # Initialize AI generator
@@ -495,4 +501,4 @@ async def global_exception_handler(request, exc):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=9009)  # Changed from 8001 to 9009
