@@ -1,6 +1,7 @@
 """
-Updated Starter Script with Background Intelligence Monitor
-Uses generic RPC provider naming - works with Helius, QuickNode, Alchemy, Custom RPCs
+🛡️ UNIFIED AI WALLET SECURITY SYSTEM
+Event-driven architecture - Only processes when transactions actually happen!
+Integrates SecurityAgent + FastAPI + Background Monitoring in one process
 """
 
 import asyncio
@@ -8,24 +9,21 @@ import os
 import requests
 import inquirer
 import time
+import uvicorn
+from contextlib import asynccontextmanager
+from typing import Callable, Optional, List, Dict, Any
 
+# Core imports - no mock dependencies
 from src.db import SQLiteDB
 from src.client.rag import RAGClient
-from tests.mock_client.rag import MockRAGClient
-from tests.mock_client.interface import RAGInterface
-from tests.mock_sensor.security import MockSecuritySensor
 from src.sensor.security import SecuritySensor
 from src.sensor.interface import SecuritySensorInterface
 from src.db import DBInterface
-from typing import Callable
 from src.rpc_config import FlexibleRPCConfig
 from src.agent.security import SecurityAgent, SecurityPromptGenerator
 from src.datatypes import StrategyData
 from src.container import ContainerManager
-from src.helper import (
-    services_to_envs,
-    services_to_prompts,
-)
+from src.helper import services_to_envs, services_to_prompts
 from src.genner import get_genner
 from src.genner.Base import Genner
 from src.client.openrouter import OpenRouter
@@ -39,69 +37,192 @@ from src.constants import SERVICE_TO_ENV
 from src.manager import fetch_default_prompt
 from dotenv import load_dotenv
 
-# NEW: Import Background Monitor
-from src.intelligence.background_monitor import BackgroundIntelligenceMonitor, start_background_monitor
+# FastAPI imports for integrated API
+from fastapi import FastAPI, HTTPException, Header, Depends
+from pydantic import BaseModel
+from datetime import datetime
 
+# Background monitoring (optional)
+try:
+    from src.intelligence.background_monitor import BackgroundIntelligenceMonitor, start_background_monitor
+    BACKGROUND_MONITOR_AVAILABLE = True
+except ImportError:
+    BACKGROUND_MONITOR_AVAILABLE = False
+    logger.warning("⚠️ Background monitor not available")
+
+# Load environment variables
 load_dotenv()
 
-# Security agent default configuration
-FE_DATA_SECURITY_DEFAULTS = {
-    "agent_name": "",
-    "type": "security",
-    "model": "claude",
-    "mode": "default",
-    "role": "security analyst protecting Web3 wallets",
-    "network": "solana",
-    "time": "24h",
-    "research_tools": ["Solana RPC", "Threat Intelligence"],
-    "security_tools": ["quarantine", "block", "monitor", "analyze"],
-    "metric_name": "security",
-    "notifications": ["blockchain_alerts"],
-}
+# ========== GLOBAL SYSTEM STATE ==========
+security_agent: Optional[SecurityAgent] = None
+background_monitor: Optional[Any] = None
 
+# ========== MODEL SELECTION SYSTEM ==========
 
-async def start_security_agent_with_background_monitor(
-    agent_type: str,
-    session_id: str,
-    agent_id: str,
-    fe_data: dict,
-    genner: Genner,
-    rag: RAGInterface,
-    sensor: SecuritySensorInterface,
-    db: DBInterface,
-    meta_swap_api_url: str,
-    stream_fn: Callable[[str], None] = lambda x: print(x, flush=True, end=""),
-):
-    """Start security agent with AI code generation AND 24/7 background monitoring"""
-    role = fe_data["role"]
-    network = fe_data["network"]
-    services_used = fe_data["research_tools"]
-    security_tools = fe_data["security_tools"]
-    metric_name = fe_data["metric_name"]
-    notif_sources = fe_data["notifications"]
-    time_ = fe_data["time"]
+def get_available_models():
+    """Get available AI models based on configured API keys - no mock options"""
+    available = []
+    
+    if os.getenv("OPENROUTER_API_KEY"):
+        available.extend([
+            "Gemini (openrouter)",
+            "QWQ (openrouter)", 
+            "OpenAI (openrouter)"
+        ])
+    
+    if os.getenv("ANTHROPIC_API_KEY"):
+        available.append("Claude")
+    
+    if os.getenv("OPENAI_API_KEY"):
+        available.append("OpenAI")
+    
+    if not available:
+        raise Exception("No AI API keys configured! Please set OPENROUTER_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY")
+    
+    return available
 
-    in_con_env = services_to_envs(services_used)
-    apis = services_to_prompts(services_used)
-    if fe_data["model"] == "deepseek":
-        fe_data["model"] = "deepseek_or"
+def get_model_backend(model_choice: str) -> str:
+    """Convert user-friendly model name to backend name - no mock options"""
+    model_naming = {
+        "OpenAI": "openai",
+        "OpenAI (openrouter)": "openai",
+        "Gemini (openrouter)": "gemini",
+        "QWQ (openrouter)": "qwq",
+        "Claude": "claude",
+    }
+    backend = model_naming.get(model_choice)
+    if not backend:
+        raise Exception(f"Unsupported model choice: {model_choice}")
+    return backend
 
-    prompt_generator = SecurityPromptGenerator(prompts=fe_data["prompts"])
+def auto_select_model():
+    """Auto-select best available AI model - no mock fallbacks"""
+    model_override = os.getenv("SECURITY_AI_MODEL", "").strip()
+    if model_override:
+        logger.info(f"🎯 Using model from SECURITY_AI_MODEL: {model_override}")
+        return model_override
+    
+    available = get_available_models()
+    if "Gemini (openrouter)" in available:
+        return "Gemini (openrouter)"
+    elif "QWQ (openrouter)" in available:
+        return "QWQ (openrouter)"
+    elif "OpenAI (openrouter)" in available:
+        return "OpenAI (openrouter)"
+    elif "Claude" in available:
+        return "Claude"
+    elif "OpenAI" in available:
+        return "OpenAI"
+    else:
+        raise Exception("No valid AI models available - check your API keys")
 
+def setup_ai_genner(model_choice: str):
+    """Setup AI generator based on model choice"""
+    backend_name = get_model_backend(model_choice)
+    logger.info(f"🤖 Initializing AI: {model_choice} → {backend_name}")
+    
+    or_client = OpenRouter(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=os.getenv("OPENROUTER_API_KEY"),
+        include_reasoning=True,
+    ) if os.getenv("OPENROUTER_API_KEY") else None
+    
+    anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY")) if os.getenv("ANTHROPIC_API_KEY") else None
+    
+    if backend_name in ["gemini", "qwq", "openai"] and model_choice.endswith("(openrouter)"):
+        if not or_client:
+            raise Exception(f"OpenRouter API key required for {model_choice}")
+        return get_genner(backend=backend_name, or_client=or_client, stream_fn=None)
+        
+    elif backend_name == "claude":
+        if not anthropic_client:
+            raise Exception("ANTHROPIC_API_KEY required for Claude")
+        return get_genner(backend=backend_name, anthropic_client=anthropic_client, stream_fn=None)
+        
+    elif backend_name == "openai" and model_choice == "OpenAI":
+        return get_genner(backend=backend_name, stream_fn=None)
+        
+    elif backend_name == "mock":
+        raise Exception("Mock AI not allowed - configure a real AI model")
+    else:
+        raise Exception(f"Unsupported model: {model_choice}")
+
+# ========== FASTAPI REQUEST/RESPONSE MODELS ==========
+
+class TransactionRequest(BaseModel):
+    transaction_hash: Optional[str] = None
+    from_address: str
+    to_address: str
+    amount: Optional[float] = None
+    token_address: Optional[str] = None
+    token_name: Optional[str] = None
+    program_id: Optional[str] = None
+    instruction_data: Optional[str] = None
+    value_usd: Optional[float] = None
+    user_id: str
+    wallet_provider: str
+    transaction_type: str = "send"
+    dapp_url: Optional[str] = None
+    dapp_name: Optional[str] = None
+    user_language: str = "english"
+    additional_data: Optional[Dict[str, Any]] = {}
+
+class SecurityResponse(BaseModel):
+    action: str  # "ALLOW", "WARN", "BLOCK"
+    risk_score: float
+    confidence: float
+    user_explanation: str
+    chain_of_thought: List[str]
+    threat_categories: List[str]
+    ai_generated_code: str
+    technical_details: Dict[str, Any]
+    analysis_time_ms: int
+    quarantine_recommended: bool
+    analysis_method: str = "ai_code_generation"
+
+# ========== SECURITY SYSTEM INITIALIZATION ==========
+
+async def initialize_security_system(fe_data: dict):
+    """Initialize the complete security system"""
+    global security_agent, background_monitor
+    
+    logger.info("🛡️ Initializing Unified AI Security System...")
+    
+    # 1. Setup AI Model
+    selected_model = auto_select_model()
+    genner = setup_ai_genner(selected_model)
+    logger.info(f"✅ AI Model: {selected_model}")
+    
+    # 2. Setup Database
+    db = SQLiteDB(db_path=os.getenv("SQLITE_PATH", "./db/security.db"))
+    logger.info("✅ Database initialized")
+    
+    # 3. Setup RAG Client - Real RAG required, no fallbacks
+    rag_service_url = os.getenv("RAG_SERVICE_URL", "http://localhost:8080")
+    agent_id = f"security_agent_{fe_data['agent_name']}"
+    session_id = f"security_session_{int(time.time())}"
+    
+    rag = RAGClient(agent_id, session_id, rag_service_url)
+    logger.info("✅ RAG Client connected")
+    
+    # 4. Setup Security Sensor
+    sensor = setup_security_sensor()
+    logger.info("✅ Security Sensor initialized")
+    
+    # 5. Setup Container Manager
     container_manager = ContainerManager(
         docker.from_env(),
-        "agent-executor",
+        "unified-security-executor", 
         "./code",
-        in_con_env=in_con_env,
+        {}
     )
-
-    summarizer = get_summarizer(genner)
-    previous_strategies = db.fetch_all_strategies(agent_id)
-
-    rag.save_result_batch_v4(previous_strategies)
-
-    # Create SecurityAgent with AI code generation
-    agent = SecurityAgent(
+    logger.info("✅ Container Manager ready")
+    
+    # 6. Setup Prompt Generator
+    prompt_generator = SecurityPromptGenerator(fe_data.get("prompts", {}))
+    
+    # 7. Create Security Agent
+    security_agent = SecurityAgent(
         agent_id=agent_id,
         sensor=sensor,
         genner=genner,
@@ -110,553 +231,419 @@ async def start_security_agent_with_background_monitor(
         db=db,
         rag=rag,
     )
-
-    # Connect SecuritySensor to SecurityAgent for real-time quarantine decisions
+    
+    # 8. Connect Sensor to Agent
     if hasattr(sensor, 'set_security_agent'):
-        sensor.set_security_agent(agent)
-        logger.info("🔗 Connected SecuritySensor to SecurityAgent for AI analysis")
+        sensor.set_security_agent(security_agent)
+        logger.info("🔗 SecuritySensor ↔ SecurityAgent connected")
     
-    # 🚀 NEW: Start Background Intelligence Monitor
-    logger.info("🔍 Starting 24/7 Background Intelligence Monitor...")
-    try:
-        background_monitor = await start_background_monitor(db, rag)
-        logger.info("✅ Background Intelligence Monitor started successfully!")
-        logger.info("📡 Now monitoring: Twitter, Reddit, blacklisted wallets, blockchain patterns")
-    except Exception as e:
-        logger.warning(f"⚠️ Background Monitor failed to start: {e}")
-        logger.info("📊 Continuing without background monitoring")
-        background_monitor = None
+    # 9. Start Background Monitor (Optional)
+    if BACKGROUND_MONITOR_AVAILABLE and fe_data.get("enable_background_monitor", False):
+        try:
+            background_monitor = await start_background_monitor(db, rag)
+            logger.info("✅ Background Intelligence Monitor started")
+        except Exception as e:
+            logger.warning(f"⚠️ Background Monitor failed: {e}")
+            background_monitor = None
     
-    # Start real-time incoming transaction monitoring
+    # 10. Start Real-Time Incoming Transaction Monitoring
     if hasattr(sensor, 'start_incoming_monitor'):
         try:
             await sensor.start_incoming_monitor()
-            logger.info("🛡️ Real-time transaction monitoring started!")
+            logger.info("✅ Real-time incoming transaction monitoring started!")
+            logger.info("📥 Auto-quarantine system active for suspicious incoming tokens/NFTs")
         except Exception as e:
-            logger.warning(f"⚠️ Could not start real-time monitoring: {e}")
-            logger.info("📊 Continuing with periodic analysis only")
-
-    flow_func = partial(
-        security_assisted_flow,
-        agent=agent,
-        session_id=session_id,
-        role=role,
-        network=network,
-        time=time_,
-        apis=apis,
-        security_tools=security_tools,
-        metric_name=metric_name,
-        meta_swap_api_url=meta_swap_api_url,
-        summarizer=summarizer,
-    )
-
-    # Run main cycle with background monitoring active
-    try:
-        await run_cycle_with_background_monitor(
-            agent,
-            notif_sources,
-            flow_func,
-            db,
-            session_id,
-            agent_id,
-            fe_data,
-            background_monitor,
-        )
-    finally:
-        # Cleanup: Stop background monitor when main cycle ends
-        if background_monitor:
-            logger.info("🛑 Stopping background monitor...")
-            await background_monitor.stop_monitoring()
-
-
-async def run_cycle_with_background_monitor(
-    agent: SecurityAgent,
-    notif_sources: list[str],
-    flow: Callable[[StrategyData | None, str | None], None],
-    db: DBInterface,
-    session_id: str,
-    agent_id: str,
-    fe_data: dict | None = None,
-    background_monitor: BackgroundIntelligenceMonitor | None = None,
-):
-    """Execute security agent workflow cycle with background intelligence"""
-    cycle_count = 0
+            logger.warning(f"⚠️ Could not start incoming monitoring: {e}")
     
-    while True:  # Continuous monitoring loop
-        try:
-            cycle_count += 1
-            logger.info(f"🔄 Starting security cycle #{cycle_count}")
-            
-            # Get previous strategy context
-            prev_strat = agent.db.fetch_latest_strategy(agent.agent_id)
-            if prev_strat is not None:
-                logger.info(f"📚 Using previous security strategy: {prev_strat.summarized_desc[:100]}...")
-                agent.rag.save_result_batch_v4([prev_strat])
-
-            # Get latest notifications + background intelligence
-            notif_limit = 5 if fe_data is None else 2
-            current_notif = agent.db.fetch_latest_notification_str_v2(
-                notif_sources, notif_limit
-            )
-            
-            # 🚀 NEW: Enhance notifications with background intelligence
-            if background_monitor:
-                try:
-                    # Get recent threat intelligence from background monitor
-                    monitor_status = await background_monitor.get_monitoring_status()
-                    
-                    if monitor_status['statistics']['threats_discovered'] > 0:
-                        threat_summary = f"Background Monitor Alert: {monitor_status['statistics']['threats_discovered']} new threats detected. "
-                        threat_summary += f"Tracking {monitor_status['blacklisted_wallets']} blacklisted wallets. "
-                        threat_summary += f"Last update: {monitor_status['statistics']['last_update']}"
-                        
-                        # Combine with existing notifications
-                        if current_notif:
-                            current_notif = f"{threat_summary}\n\nOther notifications: {current_notif}"
-                        else:
-                            current_notif = threat_summary
-                        
-                        logger.info(f"🚨 Enhanced notifications with background intelligence")
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to get background intelligence: {e}")
-            
-            logger.info(f"📢 Processing notifications: {current_notif[:100] if current_notif else 'No new notifications'}...")
-
-            # Run the main security analysis flow
-            flow(prev_strat=prev_strat, notif_str=current_notif)
-            db.add_cycle_count(session_id, agent_id)
-            
-            # Show monitoring status every 10 cycles
-            if cycle_count % 10 == 0 and background_monitor:
-                try:
-                    status = await background_monitor.get_monitoring_status()
-                    logger.info(f"📊 Background Monitor Status:")
-                    logger.info(f"   🔍 Threats discovered: {status['statistics']['threats_discovered']}")
-                    logger.info(f"   🚫 Wallets tracked: {status['blacklisted_wallets']}")
-                    logger.info(f"   📱 Social media scans: {status['statistics']['social_media_scans']}")
-                    logger.info(f"   💾 Database updates: {status['statistics']['database_updates']}")
-                except Exception as e:
-                    logger.warning(f"⚠️ Error getting monitor status: {e}")
-            
-            # Wait before next cycle (configurable)
-            cycle_interval = int(os.getenv('SECURITY_CYCLE_INTERVAL', 900))  # 15 minutes default
-            logger.info(f"⏰ Waiting {cycle_interval} seconds before next cycle...")
-            await asyncio.sleep(cycle_interval)
-            
-        except KeyboardInterrupt:
-            logger.info("🛑 Security monitoring stopped by user")
-            break
-        except Exception as e:
-            logger.error(f"❌ Error in security cycle: {e}")
-            # Wait before retrying
-            await asyncio.sleep(60)
-
+    logger.info("🚀 Security System Initialization Complete!")
+    return security_agent
 
 def setup_security_sensor() -> SecuritySensorInterface:
-    """Initialize Solana blockchain security sensor with flexible RPC configuration"""
-    
-    # Initialize flexible RPC configuration
+    """Setup security sensor with flexible RPC configuration - wallets added dynamically"""
     rpc_config = FlexibleRPCConfig()
-    
-    # Get optimal RPC configuration (now returns API key too)
     primary_url, provider_name, all_endpoints, api_key = rpc_config.detect_and_configure_rpc()
     
-    # Get monitored wallet addresses from environment
+    # Start with empty wallet list - wallets will be added via API calls from wallet providers
     monitored_wallets = []
-    wallet_env_vars = [key for key in os.environ.keys() if key.startswith("MONITOR_WALLET_")]
-    for wallet_var in wallet_env_vars:
-        wallet_address = os.environ[wallet_var]
-        if wallet_address:
-            monitored_wallets.append(wallet_address)
     
-    # Default to demo wallets if none specified
-    if not monitored_wallets:
-        monitored_wallets = [
-            "7xKs1aTF7YbL8C9s3mZNbGKPFXCWuBvf9Ss623VQ5DA",
-            "9mNp2bK8fG3cCd4sVhMnBkLpQrTt5RwXyZ7nE8hS1kL"
-        ]
+    logger.info(f"🛡️ Security sensor ready with {provider_name}")
+    logger.info("📡 Wallets will be monitored when wallet providers connect")
     
-    logger.info(f"🛡️ Setting up SecuritySensor for {len(monitored_wallets)} wallets:")
-    for wallet in monitored_wallets:
-        logger.info(f"   📡 Monitoring: {wallet[:8]}...{wallet[-8:]}")
-    
-    logger.info(f"🚀 Primary RPC: {provider_name}")
-    if api_key:
-        logger.info(f"🔑 API key configured for enhanced rate limits")
-    logger.info(f"🔄 Total endpoints available: {len(all_endpoints)}")
-    
-    # Create SecuritySensor with flexible configuration
-    sensor = SecuritySensor(
+    return SecuritySensor(
         wallet_addresses=monitored_wallets,
         solana_rpc_url=primary_url,
-        rpc_api_key=api_key,  # Generic API key for any provider
-        rpc_provider_name=provider_name,  # Clear provider name
+        rpc_api_key=api_key,
+        rpc_provider_name=provider_name,
     )
-    
-    # Print detailed configuration summary
-    config_summary = rpc_config.get_configuration_summary()
-    logger.info(f"📊 RPC Configuration Summary:")
-    logger.info(f"   🎯 Method: {config_summary['configuration_method']}")
-    logger.info(f"   🔑 Detected providers: {', '.join(config_summary['detected_providers']) if config_summary['detected_providers'] else 'None'}")
-    logger.info(f"   🔐 API key status: {'Configured' if config_summary['api_key_configured'] else 'Not configured'}")
-    logger.info(f"   🔄 Fallback endpoints: {len(config_summary['fallback_rpcs'])}")
-    
-    return sensor
 
+# ========== EVENT-DRIVEN SECURITY ANALYSIS ==========
 
-def extra_background_monitor_questions():
-    """Ask user about background monitoring configuration"""
-    questions = [
-        inquirer.List(
-            name="enable_background_monitor",
-            message="Enable 24/7 background intelligence monitoring?",
-            choices=[
-                "Yes - Monitor Twitter, Reddit, blacklisted wallets",
-                "No - Just real-time transaction analysis"
-            ],
+async def analyze_transaction_event(transaction_data: dict, user_language: str = "english"):
+    """Event-driven transaction analysis - only runs when needed!"""
+    if not security_agent:
+        raise Exception("Security system not initialized")
+    
+    logger.info(f"🔍 EVENT: Analyzing transaction to {transaction_data.get('to_address', 'unknown')}")
+    
+    try:
+        # Use SecurityAgent's AI analysis
+        analysis_result = await security_agent.analyze_with_ai_code_generation(
+            transaction_data, user_language
         )
-    ]
+        
+        # Log the analysis for transparency
+        logger.info(f"✅ Analysis complete - Risk: {analysis_result.get('risk_score', 0):.2f}")
+        
+        return analysis_result
+        
+    except Exception as e:
+        logger.error(f"❌ Analysis failed: {e}")
+        # Return safe fallback
+        return {
+            'action': 'WARN',
+            'risk_score': 0.5,
+            'confidence': 0.0,
+            'user_explanation': f'Analysis failed: {str(e)}',
+            'chain_of_thought': [f'Analysis error: {str(e)}'],
+            'threat_categories': ['analysis_error'],
+            'technical_details': {'error': str(e)},
+            'quarantine_recommended': True,
+            'ai_generated_code': '# Analysis failed',
+            'analysis_time_ms': 0
+        }
+
+# ========== FASTAPI APPLICATION WITH LIFESPAN ==========
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan manager - initializes security system on startup"""
+    # Startup
+    fe_data = {
+        "agent_name": os.getenv("SECURITY_AGENT_NAME", "unified_security"),
+        "model": auto_select_model(),
+        "enable_background_monitor": os.getenv("ENABLE_BACKGROUND_MONITOR", "false").lower() == "true",
+        "prompts": {}
+    }
     
-    answer = inquirer.prompt(questions)["enable_background_monitor"]
+    await initialize_security_system(fe_data)
+    logger.info("🚀 Security API ready for wallet integration!")
     
-    if answer.startswith("Yes"):
-        logger.info("✅ Background monitoring will be enabled")
-        logger.info("💡 Note: Twitter/Reddit API keys are optional - system works without them")
-        return True
-    else:
-        logger.info("📊 Using real-time analysis only")
-        return False
+    yield
+    
+    # Shutdown
+    if background_monitor:
+        logger.info("🛑 Stopping background monitor...")
+        try:
+            await background_monitor.stop_monitoring()
+        except:
+            pass
+    logger.info("👋 Security system shutdown complete")
 
+# Create FastAPI app with lifespan
+app = FastAPI(
+    title="🛡️ AI Wallet Security System",
+    description="Event-driven security analysis for Web3 wallets",
+    version="3.0.0",
+    lifespan=lifespan
+)
 
-def extra_research_tools_questions(answer_research_tools):
-    """Prompt for API keys needed by selected research tools"""
-    questions_rt = []
-    var_rt = []
-    for research_tool in answer_research_tools:
-        if research_tool in SERVICE_TO_ENV:
-            for env in SERVICE_TO_ENV[research_tool]:
-                if not os.getenv(env):
-                    var_rt.append(env)
-                    questions_rt.append(
-                        inquirer.Text(
-                            name=env, message=f"Please enter value for this variable {env}"
-                        )
-                    )
-    if questions_rt:
-        answers_rt = inquirer.prompt(questions_rt)
-        for env in var_rt:
-            os.environ[env] = answers_rt[env]
+# ========== API ENDPOINTS ==========
 
+@app.post("/api/v1/register-wallet")
+async def register_wallet_for_monitoring(
+    wallet_address: str,
+    wallet_provider: str,
+    user_id: Optional[str] = None
+):
+    """🔗 Register a wallet address for real-time monitoring"""
+    try:
+        if not security_agent:
+            raise HTTPException(status_code=503, detail="Security system not initialized")
+        
+        # Add wallet to monitoring list
+        if wallet_address not in security_agent.sensor.wallet_addresses:
+            security_agent.sensor.wallet_addresses.append(wallet_address)
+            logger.info(f"📡 Registered wallet for monitoring: {wallet_address[:8]}...{wallet_address[-8:]}")
+            logger.info(f"🛡️ Now monitoring {len(security_agent.sensor.wallet_addresses)} wallets")
+            
+            # Start monitoring this specific wallet if real-time monitoring is active
+            if hasattr(security_agent.sensor, 'monitoring_active') and security_agent.sensor.monitoring_active:
+                # Add monitoring task for this wallet
+                import asyncio
+                task = asyncio.create_task(security_agent.sensor._monitor_wallet_incoming(wallet_address))
+                security_agent.sensor.monitoring_tasks.append(task)
+                logger.info(f"🔄 Started real-time monitoring for new wallet")
+        
+        return {
+            "status": "success",
+            "message": f"Wallet {wallet_address[:8]}...{wallet_address[-8:]} registered for monitoring",
+            "total_monitored_wallets": len(security_agent.sensor.wallet_addresses),
+            "real_time_monitoring": hasattr(security_agent.sensor, 'monitoring_active') and security_agent.sensor.monitoring_active
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to register wallet: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to register wallet: {str(e)}")
 
-def extra_model_questions(answer_model):
-    """Configure AI model and prompt for API keys"""
-    model_naming = {
-        "Mock LLM": "mock",
-        "OpenAI": "openai",
-        "OpenAI (openrouter)": "openai",
-        "Gemini (openrouter)": "gemini",
-        "QWQ (openrouter)": "qwq",
-        "Claude": "claude",
+@app.post("/api/v1/analyze-transaction", response_model=SecurityResponse)
+async def analyze_transaction_endpoint(
+    request: TransactionRequest,
+    x_api_key: Optional[str] = Header(None),
+    x_wallet_provider: Optional[str] = Header(None)
+):
+    """🔍 MAIN ENDPOINT: Real-time transaction analysis using AI"""
+    start_time = datetime.now()
+    
+    try:
+        if not security_agent:
+            raise HTTPException(status_code=503, detail="Security system not initialized")
+        
+        logger.info(f"🚀 API: Analyzing {request.transaction_type} from {request.wallet_provider}")
+        
+        # Prepare transaction data
+        transaction_data = {
+            "hash": request.transaction_hash or f"pending_{start_time.timestamp()}",
+            "from_address": request.from_address,
+            "to_address": request.to_address,
+            "value": request.amount or 0,
+            "value_usd": request.value_usd or 0,
+            "token_address": request.token_address,
+            "token_name": request.token_name,
+            "program_id": request.program_id,
+            "instruction_data": request.instruction_data,
+            "transaction_type": request.transaction_type,
+            "dapp_url": request.dapp_url,
+            "dapp_name": request.dapp_name,
+            "timestamp": start_time.isoformat(),
+            "user_id": request.user_id,
+            "wallet_provider": request.wallet_provider,
+            "analysis_type": "outgoing_transaction",
+            **request.additional_data
+        }
+        
+        # EVENT-DRIVEN ANALYSIS (only runs when called!)
+        analysis_result = await analyze_transaction_event(transaction_data, request.user_language)
+        
+        # Calculate timing
+        analysis_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        
+        # Extract threat categories
+        threat_categories = []
+        threats_found = analysis_result.get('execution_results', {}).get('threats_found', [])
+        for threat in threats_found:
+            if 'mev' in threat.lower():
+                threat_categories.append('mev_attack')
+            elif 'honeypot' in threat.lower():
+                threat_categories.append('honeypot_token')
+            elif 'drain' in threat.lower():
+                threat_categories.append('drain_contract')
+            elif 'dust' in threat.lower():
+                threat_categories.append('dust_attack')
+            else:
+                threat_categories.append('unknown_threat')
+        
+        # Build response
+        response = SecurityResponse(
+            action=analysis_result.get('action', 'ALLOW'),
+            risk_score=analysis_result.get('risk_score', 0.0),
+            confidence=analysis_result.get('confidence', 0.8),
+            user_explanation=analysis_result.get('user_explanation', 'Transaction analyzed'),
+            chain_of_thought=analysis_result.get('chain_of_thought', []),
+            threat_categories=threat_categories,
+            ai_generated_code=analysis_result.get('ai_generated_code', ''),
+            technical_details=analysis_result.get('technical_details', {}),
+            analysis_time_ms=analysis_time_ms,
+            quarantine_recommended=analysis_result.get('risk_score', 0) >= 0.7,
+            analysis_method="event_driven_ai_analysis"
+        )
+        
+        logger.info(f"✅ API: {response.action} (risk: {response.risk_score:.2f}) in {analysis_time_ms}ms")
+        return response
+        
+    except Exception as e:
+        logger.error(f"❌ API Error: {e}")
+        return SecurityResponse(
+            action="BLOCK",
+            risk_score=1.0,
+            confidence=0.0,
+            user_explanation=f"Security analysis unavailable: {str(e)}",
+            chain_of_thought=[f"API Error: {str(e)}", "Blocking for safety"],
+            threat_categories=["api_error"],
+            ai_generated_code="# Analysis failed",
+            technical_details={"error": str(e)},
+            analysis_time_ms=0,
+            quarantine_recommended=True
+        )
+
+@app.post("/api/v1/process-incoming")
+async def process_incoming_transaction(
+    request: TransactionRequest,
+    x_api_key: Optional[str] = Header(None)
+):
+    """📥 Process incoming transactions for auto-quarantine decisions"""
+    try:
+        if not security_agent:
+            raise HTTPException(status_code=503, detail="Security system not initialized")
+        
+        logger.info(f"📥 Processing incoming transaction for {request.user_id}")
+        
+        # Prepare transaction data
+        transaction_data = {
+            "hash": request.transaction_hash or f"incoming_{datetime.now().timestamp()}",
+            "from_address": request.from_address,
+            "to_address": request.to_address,
+            "value": request.amount or 0,
+            "token_name": request.token_name,
+            "token_address": request.token_address,
+            "direction": "incoming",
+            "analysis_type": "quarantine_assessment",
+            "user_id": request.user_id,
+            "wallet_provider": request.wallet_provider
+        }
+        
+        # Use SecuritySensor's incoming transaction processing
+        analysis_result = await security_agent.sensor.process_incoming_transaction(
+            transaction_data, 
+            request.user_language
+        )
+        
+        action = analysis_result.get('action', 'ALLOW')
+        quarantine = analysis_result.get('quarantine_recommended', False)
+        
+        logger.info(f"✅ Incoming analysis: {action} | Quarantine: {quarantine}")
+        
+        return {
+            "quarantine_recommended": quarantine,
+            "risk_score": analysis_result.get('risk_score', 0.0),
+            "explanation": analysis_result.get('user_explanation', 'Transaction processed'),
+            "action": action,
+            "threat_categories": analysis_result.get('threat_categories', []),
+            "analysis_details": analysis_result
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Incoming transaction processing failed: {e}")
+        return {
+            "quarantine_recommended": True,  # Safe default
+            "risk_score": 0.8,
+            "explanation": f"Processing error - quarantined for safety: {str(e)}",
+            "action": "QUARANTINE",
+            "error": str(e)
+        }
+
+@app.get("/health")
+async def health_check():
+    """🩺 Health check endpoint"""
+    available_models = get_available_models()
+    current_model = auto_select_model()
+    
+    return {
+        "status": "healthy" if security_agent else "initializing",
+        "ai_model": current_model,
+        "available_models": available_models,
+        "security_agent_ready": security_agent is not None,
+        "background_monitor_active": background_monitor is not None,
+        "timestamp": datetime.now().isoformat(),
+        "version": "3.0.0",
+        "architecture": "unified_event_driven"
     }
 
-    if "Mock LLM" in answer_model:
-        logger.info("Notice: Using mock LLM. Responses are simulated for testing.")
-    elif "openrouter" in answer_model and not os.getenv("OPENROUTER_API_KEY"):
-        question_or_key = [
-            inquirer.Password(
-                "or_api_key", message="Please enter the Openrouter API key"
-            )
-        ]
-        answers_or_key = inquirer.prompt(question_or_key)
-        os.environ["OPENROUTER_API_KEY"] = answers_or_key["or_api_key"]
-    elif "OpenAI" == answer_model and not os.getenv("OPENAI_API_KEY"):
-        question_openai_key = [
-            inquirer.Password(
-                "openai_api_key", message="Please enter the OpenAI API key"
-            )
-        ]
-        answers_openai_key = inquirer.prompt(question_openai_key)
-        os.environ["OPENAI_API_KEY"] = answers_openai_key["openai_api_key"]
-    elif "Claude" in answer_model and not os.getenv("ANTHROPIC_API_KEY"):
-        question_claude_key = [
-            inquirer.Password(
-                "claude_api_key", message="Please enter the Claude API key"
-            )
-        ]
-        answers_claude_key = inquirer.prompt(question_claude_key)
-        os.environ["ANTHROPIC_API_KEY"] = answers_claude_key["claude_api_key"]
-    return model_naming[answer_model]
-
-
-def extra_sensor_questions():
-    """Configure security sensor for Solana monitoring with flexible RPC support"""
-    # Updated to use generic RPC terminology
-    rpc_providers = ["Any Solana RPC Provider (Helius, QuickNode, Alchemy, Custom)"]
-    question_security_sensor = [
-        inquirer.List(
-            name="sensor",
-            message=f"Do you have RPC API access for real-time monitoring?",
-            choices=[
-                "No, I'm using Mock Security Sensor for now",
-                "Yes, I have RPC API keys for real-time protection",
-            ],
-        )
-    ]
-    answer_security_sensor = inquirer.prompt(question_security_sensor)
-    if answer_security_sensor["sensor"] == "Yes, I have RPC API keys for real-time protection":
-        # Generic RPC configuration - works with any provider
-        potential_rpc_keys = [
-            "HELIUS_API_KEY", 
-            "QUICKNODE_API_KEY", 
-            "ALCHEMY_API_KEY",
-            "CUSTOM_SOLANA_API_KEY",
-            "SOLANA_RPC_URL"
-        ]
-        
-        missing_keys = [key for key in potential_rpc_keys if not os.getenv(key)]
-        
-        if missing_keys:
-            logger.info("💡 RPC Configuration Options:")
-            logger.info("   🔸 Set HELIUS_API_KEY for Helius RPC")
-            logger.info("   🔸 Set QUICKNODE_API_KEY for QuickNode RPC") 
-            logger.info("   🔸 Set ALCHEMY_API_KEY for Alchemy RPC")
-            logger.info("   🔸 Set CUSTOM_SOLANA_RPC_URL + CUSTOM_SOLANA_API_KEY for custom RPC")
-            logger.info("   🔸 Set SOLANA_RPC_URL for any RPC endpoint")
-            
-            configure_rpc = inquirer.confirm("Configure RPC settings now?", default=True)
-            if configure_rpc:
-                questions_rpc = []
-                for key in ["SOLANA_RPC_URL", "HELIUS_API_KEY"]:  # Ask for the most common ones
-                    if not os.getenv(key):
-                        questions_rpc.append(
-                            inquirer.Text(
-                                name=key, 
-                                message=f"Enter {key} (optional - leave blank to skip)",
-                                default=""
-                            )
-                        )
-                
-                if questions_rpc:
-                    answers_rpc = inquirer.prompt(questions_rpc)
-                    for key, value in answers_rpc.items():
-                        if value.strip():  # Only set if not empty
-                            os.environ[key] = value.strip()
-        
-        sensor = setup_security_sensor()
-        logger.info("🚀 Real-time SecuritySensor configured with flexible RPC!")
-        return sensor
-    else:
-        logger.info("📊 Using Mock SecuritySensor for testing")
-        return MockSecuritySensor(["demo_wallet"], "mock_rpc", "mock_key")
-
-
-def extra_rag_questions(answer_rag):
-    """Configure RAG client"""
-    if answer_rag == "Yes, i have setup the RAG":
-        # RAGClient expects agent_id as first parameter
-        agent_id = f"security_agent_{int(time.time())}"
-        
-        try:
-            return RAGClient(agent_id)  # Just agent_id
-        except TypeError as e:
-            logger.warning(f"⚠️ RAGClient constructor error: {e}")
-            logger.info("📚 Falling back to Mock RAG")
-            return MockRAGClient()
-    else:
-        logger.info("📚 Using Mock RAG for testing")
-        return MockRAGClient()
-
-
-async def main_security_loop(fe_data, genner, rag_client, sensor):
-    """Main async loop for security agent with background monitoring"""
+@app.get("/api/v1/system-status")
+async def get_system_status():
+    """📊 Detailed system status"""
+    if not security_agent:
+        return {"status": "initializing", "message": "Security system starting up..."}
     
-    # Initialize database
-    db = SQLiteDB(db_path=os.getenv("SQLITE_PATH", "./db/security.db"))
-    
-    # Generate session and agent IDs
-    session_id = f"security_session_{int(time.time())}"
-    agent_id = f"security_agent_{fe_data['agent_name']}"
-    
-    logger.info(f"🆔 Session ID: {session_id}")
-    logger.info(f"🤖 Agent ID: {agent_id}")
-    
-    # Start the enhanced security agent with background monitoring
-    await start_security_agent_with_background_monitor(
-        agent_type="security",
-        session_id=session_id,
-        agent_id=agent_id,
-        fe_data=fe_data,
-        genner=genner,
-        rag=rag_client,
-        sensor=sensor,
-        db=db,
-        meta_swap_api_url=os.getenv("META_SWAP_API_URL", "http://localhost:9009"),
-    )
+    try:
+        security_status = security_agent.sensor.get_security_status()
+        
+        system_status = {
+            "security_agent": {
+                "status": "active",
+                "agent_id": security_agent.agent_id,
+                "analysis_method": "event_driven_ai"
+            },
+            "security_sensor": {
+                "status": "active",
+                "monitored_wallets": security_status.get('monitored_wallets', 0),
+                "modules_loaded": security_status.get('modules_loaded', ''),
+                "rpc_provider": security_status.get('rpc_provider', 'unknown'),
+                "incoming_monitoring": security_status.get('monitoring_active', False)
+            },
+            "background_monitor": {
+                "status": "active" if background_monitor else "disabled",
+                "threats_detected": security_status.get('total_threats_detected', 0)
+            },
+            "ai_model": {
+                "current": auto_select_model(),
+                "backend": get_model_backend(auto_select_model())
+            },
+            "performance": {
+                "last_analysis": security_status.get('last_analysis', ''),
+                "analysis_method": "event_driven"
+            }
+        }
+        
+        return system_status
+        
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
+# ========== USER CONFIGURATION ==========
 
 def starter_prompt():
-    """Fully automated starter for security system - minimal questions"""
+    """Interactive configuration for unified security system"""
     
-    # Only ask the essentials
     questions = [
-        inquirer.Text("agent_name", message="What's the name of your security agent?", default=""),
+        inquirer.Text("agent_name", message="Security Agent Name:", default="unified_security"),
         inquirer.List(
             name="model",
             message="Which AI model do you want to use?",
-            choices=[
-                "Claude",
-                "OpenAI",
-                "OpenAI (openrouter)",
-                "Gemini (openrouter)", 
-                "QWQ (openrouter)",
-                "Mock LLM"
-            ],
+            choices=get_available_models(),  # Dynamic list based on API keys
         ),
+        inquirer.Confirm("enable_background_monitor", message="Enable background threat monitoring?", default=True),
+        inquirer.Confirm("start_api", message="Start wallet integration API?", default=True),
     ]
+    
     answers = inquirer.prompt(questions)
-
-    logger.info("🛡️ Auto-configuring security system...")
     
-    # AUTO-DETECT: RAG availability
-    rag_client = auto_detect_rag()
+    # Set environment variables for API mode
+    os.environ["SECURITY_AGENT_NAME"] = answers["agent_name"]
+    os.environ["SECURITY_AI_MODEL"] = answers["model"]
+    os.environ["ENABLE_BACKGROUND_MONITOR"] = str(answers["enable_background_monitor"]).lower()
     
-    # AUTO-CONFIGURE: AI model
-    model_name = extra_model_questions(answers["model"])
+    logger.info("🛡️ Starting Unified AI Security System...")
+    logger.info(f"🤖 AI Model: {answers['model']}")
+    logger.info(f"📡 Background Monitor: {'Enabled' if answers['enable_background_monitor'] else 'Disabled'}")
     
-    # AUTO-CONFIGURE: Security tools (no questions)
-    security_research_tools = ["Solana RPC", "Threat Intelligence", "DuckDuckGo"]
-    security_notifications = ["blockchain_alerts", "security_alerts", "community_reports"]
-    
-    logger.info(f"✅ Enabled research tools: {', '.join(security_research_tools)}")
-    logger.info(f"✅ Enabled notifications: {', '.join(security_notifications)}")
-    
-    # AUTO-CONFIGURE: API keys (only ask if missing and needed)
-    auto_configure_api_keys(security_research_tools)
-    
-    # AUTO-DETECT: Sensor capabilities
-    sensor = auto_detect_sensor()
-    
-    # AUTO-CONFIGURE: Background monitoring (enable if APIs available)
-    enable_background_monitor = auto_detect_background_monitoring()
-
-    # Build configuration
-    fe_data = FE_DATA_SECURITY_DEFAULTS.copy()
-    fe_data["agent_name"] = answers["agent_name"]
-    fe_data["research_tools"] = security_research_tools
-    fe_data["notifications"] = security_notifications
-    fe_data["prompts"] = fetch_default_prompt(fe_data, "security")
-    fe_data["model"] = model_name
-    fe_data["enable_background_monitor"] = enable_background_monitor
-
-    # Initialize AI generators
-    genner = get_genner(
-        backend=fe_data["model"],
-        or_client=get_openrouter_client(),
-        anthropic_client=get_anthropic_client(),
-        stream_fn=lambda token: print(token, end="", flush=True),
-    )
-    
-    logger.info("🚀 Starting Fully Automated AI Security System...")
-    asyncio.run(main_security_loop(fe_data, genner, rag_client, sensor))
-
-
-def auto_detect_rag():
-    """Auto-detect RAG availability"""
-    rag_url = os.getenv("RAG_SERVICE_URL", "http://localhost:8080")
-
-    try:
-        # Test if RAG service is running
-        response = requests.get(f"{rag_url}/health", timeout=2)
-        if response.status_code == 200:
-            logger.info(f"✅ RAG service detected at {rag_url}")
-
-            # Try to create RAGClient with different constructor patterns
-            agent_id = f"security_agent_{int(time.time())}"
-            session_id = f"security_session_{int(time.time())}"
-
-            try:
-                return RAGClient(agent_id)
-            except TypeError:
-                try:
-                    return RAGClient(agent_id, session_id, rag_url)
-                except TypeError:
-                    try:
-                        return RAGClient(session_id, rag_url)
-                    except TypeError:
-                        logger.warning("⚠️ RAGClient constructor mismatch, using Mock RAG")
-                        # Fix MockRAGClient constructor
-                        return MockRAGClient(agent_id, session_id)
-        else:
-            logger.info("📚 RAG service not available, using Mock RAG")
-            # Fix MockRAGClient constructor
-            agent_id = f"security_agent_{int(time.time())}"
-            session_id = f"security_session_{int(time.time())}"
-            return MockRAGClient(agent_id, session_id)
-
-    except Exception as e:
-        logger.info(f"📚 RAG auto-detection failed ({e}), using Mock RAG")
-        # Fix MockRAGClient constructor
-        agent_id = f"security_agent_{int(time.time())}"
-        session_id = f"security_session_{int(time.time())}"
-        return MockRAGClient(agent_id, session_id)
-
-
-def auto_configure_api_keys(research_tools):
-    """Only ask for API keys if they're missing and actually needed"""
-    missing_keys = []
-    
-    for tool in research_tools:
-        if tool in SERVICE_TO_ENV:
-            for env_var in SERVICE_TO_ENV[tool]:
-                if not os.getenv(env_var):
-                    missing_keys.append(env_var)
-    
-    if missing_keys:
-        logger.info(f"💡 Optional API keys missing: {', '.join(missing_keys)}")
-        logger.info("📊 System will work without them, using fallback methods")
+    if answers["start_api"]:
+        # Start unified system with API
+        api_port = int(os.getenv("SECURITY_API_PORT", "9009"))
+        logger.info(f"🚀 Starting unified security system on port {api_port}")
         
-        # Only ask if user wants to provide them
-        if inquirer.confirm("Configure optional API keys for enhanced features?", default=False):
-            extra_research_tools_questions(research_tools)
-
-
-def auto_detect_sensor():
-    """Auto-detect sensor capabilities with flexible RPC support"""
-    rpc_config = FlexibleRPCConfig()
-    detected_providers = rpc_config._get_detected_providers()
-
-    if detected_providers or os.getenv("CUSTOM_SOLANA_RPC_URL") or os.getenv("SOLANA_RPC_URL"):
-        provider_names = ', '.join(detected_providers) if detected_providers else 'configured RPC'
-        logger.info(f"🛡️ Real-time sensor available with {provider_names}")
-        return setup_security_sensor()
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=api_port,
+            log_level="info"
+        )
     else:
-        logger.info("📊 Using Mock sensor (add RPC configuration for real-time protection)")
-        logger.info("💡 Supported providers: Helius, QuickNode, Alchemy, Custom RPCs")
-        return MockSecuritySensor(["demo_wallet"], "mock_rpc", "mock_key")
+        # Just run security monitoring without API
+        logger.info("🔍 Starting security monitoring only (no API)")
+        fe_data = {
+            "agent_name": answers["agent_name"],
+            "model": answers["model"],
+            "enable_background_monitor": answers["enable_background_monitor"],
+            "prompts": {}
+        }
+        asyncio.run(initialize_security_system(fe_data))
+        logger.info("✅ Security monitoring active - press Ctrl+C to stop")
+        try:
+            asyncio.run(asyncio.Event().wait())  # Wait forever
+        except KeyboardInterrupt:
+            logger.info("👋 Security system stopped")
 
-
-def auto_detect_background_monitoring():
-    """Auto-detect background monitoring capabilities"""
-    if os.getenv("TWITTER_BEARER_TOKEN") or os.getenv("REDDIT_CLIENT_ID"):
-        logger.info("📡 Background monitoring APIs available")
-        return True
-    else:
-        logger.info("📊 Background monitoring disabled (add Twitter/Reddit keys to enable)")
-        return False
-
-
-def get_openrouter_client():
-    """Get OpenRouter client if available"""
-    return OpenRouter(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=os.getenv("OPENROUTER_API_KEY"),
-        include_reasoning=True,
-    ) if os.getenv("OPENROUTER_API_KEY") else None
-
-
-def get_anthropic_client():
-    """Get Anthropic client if available"""
-    return Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY")) if os.getenv("ANTHROPIC_API_KEY") else None
+# ========== MAIN ENTRY POINT ==========
 
 if __name__ == "__main__":
     starter_prompt()

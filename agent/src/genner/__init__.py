@@ -18,7 +18,6 @@ from src.genner.OR import OpenRouterGenner
 from .Base import Genner
 from .Deepseek import DeepseekGenner
 from .Qwen import QwenGenner
-from tests.mock_genner.MockGenner import MockGenner
 
 __all__ = ["get_genner", "QwenGenner", "OllamaConfig"]
 
@@ -175,8 +174,6 @@ def get_genner(
 			raise Exception("Using backend 'qwq', OpenRouter client is not provided.")
 
 		return OpenRouterGenner(or_client, qwq_config, stream_fn)
-	elif backend == "mock":
-		return MockGenner()
 	raise BackendException(
 		f"Unsupported backend: {backend}, available backends: {', '.join(available_backends)}"
 	)
