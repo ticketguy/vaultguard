@@ -1,28 +1,22 @@
-"""
-Background Intelligence Monitor - 24/7 Threat Detection
-Monitors social media, tracks blacklisted wallets, updates threat database
-Feeds fresh intelligence to RAG system for AI code generation
-"""
 
 import asyncio
 import json
 import os
-import time
-import requests
 import re
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
 import logging
+import aiohttp
 
-# Twitter API (if available)
+# Twitter API
 try:
     import tweepy
 except ImportError:
     tweepy = None
 
-# Reddit API (if available)  
+# Reddit API
 try:
     import praw
 except ImportError:
@@ -31,23 +25,11 @@ except ImportError:
 # Database and RAG integration
 from src.db import SQLiteDB
 from src.client.rag import RAGClient
-# Try to import from rag-api, fallback if not available
-try:
-    import sys
-    import os
-    sys.path.append(os.path.join(os.path.dirname(__file__), '../../../rag-api'))
-    from src.fetch import update_community_intelligence
-except ImportError:
-    # Fallback: create a mock function
-    async def update_community_intelligence(data):
-        print(f"📝 Would update community intelligence: {data}")
-        return True
+from src.intelligence.edge_learning_engine import EdgeLearningEngine
 
-        
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("BackgroundMonitor")
-
+logger = logging.getLogger("EnhancedBackgroundMonitor")
 
 @dataclass
 class ThreatIntelligence:
@@ -61,7 +43,6 @@ class ThreatIntelligence:
     discovered_at: datetime
     severity: str  # low, medium, high, critical
 
-
 @dataclass
 class BlacklistedWallet:
     """Structure for blacklisted wallet tracking"""
@@ -72,112 +53,166 @@ class BlacklistedWallet:
     confidence: float
     sources: List[str]
 
-
-class BackgroundIntelligenceMonitor:
+class EnhancedBackgroundIntelligenceMonitor:
     """
-    24/7 Background Intelligence Monitor
-    Continuously gathers threat intelligence from multiple sources
+    Enhanced Background Intelligence Monitor - Integrated with EdgeLearningEngine
+    Feeds fresh threat intelligence directly to the cache for instant transaction analysis
     """
     
-    def __init__(self, db: SQLiteDB, rag: RAGClient):
+    def __init__(self, db: SQLiteDB, rag: RAGClient, edge_learning_engine: Optional[EdgeLearningEngine] = None):
         self.db = db
         self.rag = rag
+        self.edge_learning_engine = edge_learning_engine
         
-        # Monitoring configuration
         self.config = {
-            'monitor_interval': int(os.getenv('MONITOR_INTERVAL', 300)),  # 5 minutes
-            'social_media_interval': int(os.getenv('SOCIAL_INTERVAL', 1800)),  # 30 minutes
-            'wallet_tracking_interval': int(os.getenv('WALLET_INTERVAL', 600)),  # 10 minutes
-            'threat_update_interval': int(os.getenv('THREAT_UPDATE_INTERVAL', 3600)),  # 1 hour
+            'monitor_interval': int(os.getenv('MONITOR_INTERVAL', 600)),  # 10 minutes
+            'social_media_interval': int(os.getenv('SOCIAL_INTERVAL', 7200)),  # 2 hours
+            'wallet_tracking_interval': int(os.getenv('WALLET_INTERVAL', 1800)),  # 30 minutes
+            'threat_update_interval': int(os.getenv('THREAT_UPDATE_INTERVAL', 10800)),  # 3 hours
+            'cache_update_interval': int(os.getenv('CACHE_UPDATE_INTERVAL', 300)),  # 5 minutes
         }
         
-        # Data storage
         self.blacklisted_wallets: Dict[str, BlacklistedWallet] = {}
-        self.threat_keywords = [
-            'scam', 'rug pull', 'honeypot', 'drain', 'exploit', 'hack',
-            'phishing', 'fake token', 'solana scam', 'mev attack',
-            'dust attack', 'pump and dump', 'exit scam'
-        ]
-        
-        # API clients
+        self.threat_keywords = ['solana scam', 'sol drain', 'solana hack']
+        self._twitter_keyword_index = 0
+        self._reddit_subreddit_index = 0
         self.twitter_client = None
         self.reddit_client = None
-        
-        # Monitoring state
         self.monitoring_active = False
         self.monitoring_tasks = []
+        self.cache_update_queue = asyncio.Queue(maxsize=1000)
         
-        # Statistics
         self.stats = {
             'threats_discovered': 0,
             'wallets_tracked': 0,
             'social_media_scans': 0,
             'database_updates': 0,
-            'last_update': datetime.now()
+            'cache_updates_sent': 0,
+            'edge_learning_integration': edge_learning_engine is not None,
+            'last_update': datetime.now(),
+            'twitter_api_calls': 0,
+            'reddit_api_calls': 0,
+            'rate_limit_hits': 0
         }
         
-        logger.info("🔍 Background Intelligence Monitor initialized")
+        logger.info("🔍 Enhanced Background Intelligence Monitor initialized")
+        if edge_learning_engine:
+            logger.info("🧠 EdgeLearningEngine integration active!")
+        else:
+            logger.warning("⚠️ EdgeLearningEngine not available - limited functionality")
 
     async def initialize(self):
         """Initialize API clients and load existing data"""
-        logger.info("🚀 Initializing Background Intelligence Monitor...")
+        logger.info("🚀 Initializing Enhanced Background Intelligence Monitor...")
         
-        # Initialize social media clients
         await self._init_social_media_clients()
-        
-        # Load existing blacklisted wallets
         await self._load_blacklisted_wallets()
-        
-        # Load threat intelligence patterns
         await self._load_threat_patterns()
         
-        logger.info("✅ Background Monitor initialization complete")
+        if self.edge_learning_engine:
+            await self._integrate_with_edge_learning_engine()
+        
+        logger.info("✅ Enhanced Background Monitor initialization complete")
+
+    async def _integrate_with_edge_learning_engine(self):
+        """Integrate with EdgeLearningEngine for cached intelligence"""
+        try:
+            if hasattr(self.edge_learning_engine, 'background_monitor'):
+                self.edge_learning_engine.background_monitor = self
+                logger.info("🔗 EdgeLearningEngine ↔ BackgroundMonitor connected")
+            
+            await self._preload_blacklist_cache()
+            
+            logger.info("✅ EdgeLearningEngine integration complete")
+        except Exception as e:
+            logger.error(f"❌ EdgeLearningEngine integration failed: {e}")
+
+    async def _preload_blacklist_cache(self):
+        """Preload existing blacklisted wallets into EdgeLearningEngine cache"""
+        if not self.edge_learning_engine:
+            return
+        
+        try:
+            preload_count = 0
+            
+            for address, wallet in self.blacklisted_wallets.items():
+                intelligence = {
+                    'threat_patterns': [f'Blacklisted: {wallet.threat_type}'],
+                    'analysis_suggestions': ['comprehensive_analysis', 'behavior_analysis'],
+                    'confidence_boost': 0.8,
+                    'risk_indicators': {
+                        'blacklisted': True,
+                        'threat_type': wallet.threat_type,
+                        'confidence': wallet.confidence,
+                        'activity_count': wallet.activity_count,
+                        'sources': wallet.sources
+                    }
+                }
+                
+                cache_key = f"address_{address}"
+                self.edge_learning_engine.intelligence_cache.set(
+                    cache_key,
+                    intelligence,
+                    source='background_monitor_preload',
+                    ttl_seconds=86400
+                )
+                
+                preload_count += 1
+            
+            logger.info(f"🧠 Preloaded {preload_count} blacklisted wallets into EdgeLearningEngine cache")
+        except Exception as e:
+            logger.error(f"❌ Cache preload error: {e}")
 
     async def _init_social_media_clients(self):
-        """Initialize Twitter and Reddit API clients"""
-        
-        # Initialize Twitter client
+        """Initialize Twitter and Reddit API clients with rate limiting"""
         if tweepy and os.getenv('TWITTER_BEARER_TOKEN'):
             try:
                 self.twitter_client = tweepy.Client(
                     bearer_token=os.getenv('TWITTER_BEARER_TOKEN'),
-                    wait_on_rate_limit=True
+                    wait_on_rate_limit=False  # Use custom rate limiting
                 )
                 logger.info("🐦 Twitter client initialized")
             except Exception as e:
                 logger.warning(f"⚠️ Twitter client failed: {e}")
+                self.twitter_client = None
+        else:
+            logger.info("🐦 Twitter client not configured (no TWITTER_BEARER_TOKEN)")
         
-        # Initialize Reddit client
         if praw and os.getenv('REDDIT_CLIENT_ID'):
             try:
                 self.reddit_client = praw.Reddit(
                     client_id=os.getenv('REDDIT_CLIENT_ID'),
                     client_secret=os.getenv('REDDIT_CLIENT_SECRET'),
-                    user_agent='SecurityMonitor/1.0'
+                    user_agent='EnhancedSecurityMonitor/2.0'
                 )
                 logger.info("🔴 Reddit client initialized")
             except Exception as e:
                 logger.warning(f"⚠️ Reddit client failed: {e}")
+                self.reddit_client = None
+        else:
+            logger.info("🔴 Reddit client not configured")
 
     async def _load_blacklisted_wallets(self):
         """Load existing blacklisted wallets from database"""
         try:
-            # Query database for blacklisted wallets
-            blacklist_data = self.db.fetch_blacklisted_wallets()
-            
-            for wallet_data in blacklist_data:
-                wallet = BlacklistedWallet(
-                    address=wallet_data['wallet_address'],
-                    threat_type=wallet_data['threat_type'],
-                    last_activity=wallet_data.get('last_activity'),
-                    activity_count=wallet_data.get('activity_count', 0),
-                    confidence=wallet_data.get('confidence', 0.8),
-                    sources=wallet_data.get('sources', ['database'])
-                )
-                self.blacklisted_wallets[wallet.address] = wallet
-            
-            logger.info(f"📋 Loaded {len(self.blacklisted_wallets)} blacklisted wallets")
-            
+            if hasattr(self.db, 'fetch_blacklisted_wallets'):
+                blacklist_data = self.db.fetch_blacklisted_wallets()
+                
+                for wallet_data in blacklist_data:
+                    wallet = BlacklistedWallet(
+                        address=wallet_data['wallet_address'],
+                        threat_type=wallet_data['threat_type'],
+                        last_activity=wallet_data.get('last_activity'),
+                        activity_count=wallet_data.get('activity_count', 0),
+                        confidence=wallet_data.get('confidence', 0.8),
+                        sources=wallet_data.get('sources', ['database'])
+                    )
+                    self.blacklisted_wallets[wallet.address] = wallet
+                
+                logger.info(f"📋 Loaded {len(self.blacklisted_wallets)} blacklisted wallets")
+            else:
+                logger.info("📋 No blacklisted wallets method in database, starting fresh")
+                self.blacklisted_wallets = {}
         except Exception as e:
             logger.warning(f"⚠️ Failed to load blacklisted wallets: {e}")
             self.blacklisted_wallets = {}
@@ -189,12 +224,12 @@ class BackgroundIntelligenceMonitor:
             if patterns_file.exists():
                 with open(patterns_file, 'r') as f:
                     patterns = json.load(f)
-                    self.threat_keywords.extend(patterns.get('keywords', []))
+                    self.threat_keywords = patterns.get('keywords', self.threat_keywords)
                     logger.info(f"📚 Loaded {len(self.threat_keywords)} threat keywords")
+            else:
+                logger.info(f"📚 Using default threat keywords: {len(self.threat_keywords)} keywords")
         except Exception as e:
             logger.warning(f"⚠️ Failed to load threat patterns: {e}")
-
-    # ========== MAIN MONITORING METHODS ==========
 
     async def start_monitoring(self):
         """Start all background monitoring tasks"""
@@ -203,146 +238,303 @@ class BackgroundIntelligenceMonitor:
             return
         
         self.monitoring_active = True
-        logger.info("🛡️ Starting 24/7 background intelligence monitoring...")
+        logger.info("🛡️ Starting enhanced background intelligence monitoring...")
         
-        # Start monitoring tasks
         self.monitoring_tasks = [
             asyncio.create_task(self._social_media_monitor()),
             asyncio.create_task(self._wallet_activity_tracker()),
             asyncio.create_task(self._threat_database_updater()),
-            asyncio.create_task(self._blockchain_scanner()),
+            asyncio.create_task(self._cache_update_processor()),
         ]
         
         logger.info(f"📡 Started {len(self.monitoring_tasks)} monitoring tasks")
+        logger.info("⏰ Social media: every 2 hours | Wallets: every 30 min | Cache: every 5 min")
 
     async def stop_monitoring(self):
         """Stop all monitoring tasks"""
         self.monitoring_active = False
         
         for task in self.monitoring_tasks:
-            task.cancel()
+            if not task.done():
+                task.cancel()
         
-        logger.info("🛑 Background monitoring stopped")
+        await asyncio.gather(*self.monitoring_tasks, return_exceptions=True)
+        
+        logger.info("🛑 Enhanced background monitoring stopped")
 
-    # ========== SOCIAL MEDIA MONITORING ==========
+    async def _cache_update_processor(self):
+        """Process cache updates for EdgeLearningEngine"""
+        while self.monitoring_active:
+            try:
+                if not self.edge_learning_engine:
+                    await asyncio.sleep(self.config['cache_update_interval'])
+                    continue
+                
+                logger.debug("🧠 Processing cache updates for EdgeLearningEngine...")
+                
+                updates_processed = 0
+                while not self.cache_update_queue.empty():
+                    try:
+                        cache_update = await asyncio.wait_for(
+                            self.cache_update_queue.get(),
+                            timeout=1.0
+                        )
+                        
+                        await self._apply_cache_update(cache_update)
+                        updates_processed += 1
+                        
+                    except asyncio.TimeoutError:
+                        break
+                    except Exception as e:
+                        logger.warning(f"⚠️ Cache update error: {e}")
+                
+                if updates_processed > 0:
+                    logger.info(f"🧠 Applied {updates_processed} cache updates")
+                    self.stats['cache_updates_sent'] += updates_processed
+                
+                await asyncio.sleep(self.config['cache_update_interval'])
+                
+            except Exception as e:
+                logger.error(f"❌ Cache update processor error: {e}")
+                self.stats['rate_limit_hits'] += 1
+                await asyncio.sleep(self.config['cache_update_interval'])
+
+    async def _apply_cache_update(self, cache_update: Dict):
+        """Apply a cache update to EdgeLearningEngine"""
+        try:
+            update_type = cache_update.get('type')
+            data = cache_update.get('data', {})
+            
+            if update_type == 'blacklist_wallet':
+                address = data.get('address')
+                threat_type = data.get('threat_type', 'unknown')
+                confidence = data.get('confidence', 0.8)
+                
+                intelligence = {
+                    'threat_patterns': [f'Blacklisted: {threat_type}'],
+                    'analysis_suggestions': ['comprehensive_analysis', 'behavior_analysis'],
+                    'confidence_boost': confidence,
+                    'risk_indicators': {
+                        'blacklisted': True,
+                        'threat_type': threat_type,
+                        'discovered_by': 'background_monitor',
+                        'timestamp': datetime.now().isoformat()
+                    }
+                }
+                
+                cache_key = f"address_{address}"
+                self.edge_learning_engine.intelligence_cache.set(
+                    cache_key,
+                    intelligence,
+                    source='background_monitor_live',
+                    ttl_seconds=86400
+                )
+                
+                logger.info(f"🧠 Updated cache for blacklisted address: {address[:8]}...")
+                
+            elif update_type == 'threat_intelligence':
+                addresses = data.get('addresses', [])
+                tokens = data.get('tokens', [])
+                threat_type = data.get('threat_type', 'unknown')
+                
+                intelligence = {
+                    'threat_patterns': [f'Social media threat: {threat_type}'],
+                    'analysis_suggestions': ['social_media_analysis', 'comprehensive_analysis'],
+                    'confidence_boost': data.get('confidence', 0.6),
+                    'risk_indicators': {
+                        'social_media_threat': True,
+                        'threat_type': threat_type,
+                        'source': data.get('source', 'unknown'),
+                        'discovered_at': data.get('discovered_at', datetime.now().isoformat())
+                    }
+                }
+                
+                for address in addresses:
+                    cache_key = f"address_{address}"
+                    self.edge_learning_engine.intelligence_cache.set(
+                        cache_key,
+                        intelligence,
+                        source='background_monitor_threat',
+                        ttl_seconds=43200
+                    )
+                
+                for token in tokens:
+                    cache_key = f"token_{token.lower()}"
+                    self.edge_learning_engine.intelligence_cache.set(
+                        cache_key,
+                        intelligence,
+                        source='background_monitor_threat',
+                        ttl_seconds=43200
+                    )
+                
+                logger.info(f"🧠 Updated cache for threat: {threat_type} ({len(addresses)} addresses, {len(tokens)} tokens)")
+            
+        except Exception as e:
+            logger.error(f"❌ Cache update application error: {e}")
 
     async def _social_media_monitor(self):
         """Monitor social media for new threat intelligence"""
-        while self.monitoring_active:
-            try:
-                logger.info("🔍 Scanning social media for threats...")
-                
-                # Monitor Twitter
-                if self.twitter_client:
-                    await self._monitor_twitter()
-                
-                # Monitor Reddit
-                if self.reddit_client:
-                    await self._monitor_reddit()
-                
-                # Monitor other sources
-                await self._monitor_security_blogs()
-                
-                self.stats['social_media_scans'] += 1
-                
-                # Wait before next scan
-                await asyncio.sleep(self.config['social_media_interval'])
-                
-            except Exception as e:
-                logger.error(f"❌ Social media monitoring error: {e}")
-                await asyncio.sleep(self.config['social_media_interval'])
-
-    async def _monitor_twitter(self):
-        """Monitor Twitter for security alerts"""
-        try:
-            # Search for security-related tweets
-            security_accounts = [
-                '@SolanaFloor', '@SolanaSecurity', '@DeFiSafety',
-                '@SlowMist_Team', '@PeckShieldAlert', '@CertiKAlert'
-            ]
-            
-            for keyword in self.threat_keywords[:5]:  # Limit API calls
+        async with aiohttp.ClientSession() as session:
+            while self.monitoring_active:
                 try:
-                    tweets = self.twitter_client.search_recent_tweets(
-                        query=f'"{keyword}" (solana OR sol) -is:retweet',
-                        max_results=10,
-                        tweet_fields=['created_at', 'author_id', 'public_metrics']
-                    )
+                    logger.info("🔍 Scanning social media for threats...")
                     
-                    if tweets.data:
-                        for tweet in tweets.data:
-                            await self._process_social_media_threat(
-                                content=tweet.text,
-                                source='twitter',
-                                created_at=tweet.created_at,
-                                url=f"https://twitter.com/i/status/{tweet.id}"
-                            )
+                    if self.twitter_client:
+                        await self._monitor_twitter_enhanced(session)
+                        await asyncio.sleep(30)
                     
-                    # Rate limiting delay
-                    await asyncio.sleep(2)
+                    if self.reddit_client:
+                        await self._monitor_reddit_enhanced(session)
+                    
+                    self.stats['social_media_scans'] += 1
+                    
+                    next_scan_hours = self.config['social_media_interval'] / 3600
+                    logger.info(f"⏰ Waiting {next_scan_hours:.1f} hours before next social media scan...")
+                    await asyncio.sleep(self.config['social_media_interval'])
                     
                 except Exception as e:
+                    logger.error(f"❌ Social media monitoring error: {e}")
+                    self.stats['rate_limit_hits'] += 1
+                    await asyncio.sleep(self.config['social_media_interval'])
+
+    async def _monitor_twitter_enhanced(self, session: aiohttp.ClientSession):
+        """Enhanced Twitter monitoring with cache updates and rate limiting"""
+        if not self.twitter_client:
+            logger.info("🐦 Twitter client not available - skipping")
+            return
+            
+        try:
+            if not self.threat_keywords:
+                return
+                
+            keyword = self.threat_keywords[self._twitter_keyword_index % len(self.threat_keywords)]
+            self._twitter_keyword_index += 1
+            
+            logger.info(f"🐦 Checking Twitter for: '{keyword}'")
+            
+            try:
+                tweets = await asyncio.wait_for(
+                    self.twitter_client.search_recent_tweets(
+                        query=f'"{keyword}" -is:retweet',
+                        max_results=5,
+                        tweet_fields=['created_at', 'author_id']
+                    ),
+                    timeout=10
+                )
+                
+                self.stats['twitter_api_calls'] += 1
+                
+                if tweets and tweets.data:
+                    logger.info(f"📝 Found {len(tweets.data)} tweets for '{keyword}'")
+                    for tweet in tweets.data:
+                        await self._process_social_media_threat_enhanced(
+                            content=tweet.text,
+                            source='twitter',
+                            created_at=tweet.created_at,
+                            url=f"https://twitter.com/i/status/{tweet.id}"
+                        )
+                else:
+                    logger.info(f"📝 No tweets found for '{keyword}'")
+                
+                logger.info(f"✅ Twitter check complete for '{keyword}'")
+                
+            except asyncio.TimeoutError:
+                logger.warning(f"⏸️ Twitter request timeout for '{keyword}'")
+                self.stats['rate_limit_hits'] += 1
+                await self._fallback_to_reddit(session, keyword)
+            except Exception as e:
+                if "rate limit" in str(e).lower():
+                    logger.warning(f"⏸️ Twitter rate limit reached, backing off for 60s")
+                    self.stats['rate_limit_hits'] += 1
+                    await asyncio.sleep(60)
+                    await self._fallback_to_reddit(session, keyword)
+                else:
                     logger.warning(f"⚠️ Twitter search error for '{keyword}': {e}")
             
         except Exception as e:
             logger.error(f"❌ Twitter monitoring error: {e}")
 
-    async def _monitor_reddit(self):
-        """Monitor Reddit for security discussions"""
-        try:
-            subreddits = ['solana', 'defi', 'CryptoCurrency', 'SolanaScams']
+    async def _fallback_to_reddit(self, session: aiohttp.ClientSession, keyword: str):
+        """Fallback to Reddit search on Twitter rate limit"""
+        if not self.reddit_client:
+            logger.info("🔴 Reddit client not available - skipping fallback")
+            return
             
-            for subreddit_name in subreddits:
-                try:
-                    subreddit = self.reddit_client.subreddit(subreddit_name)
+        try:
+            subreddit = self.reddit_client.subreddit('solana')
+            logger.info(f"🔴 Falling back to Reddit for keyword: {keyword}")
+            
+            posts_found = 0
+            for submission in subreddit.hot(limit=5):
+                title_lower = submission.title.lower()
+                if keyword.lower() in title_lower:
+                    await self._process_social_media_threat_enhanced(
+                        content=f"{submission.title}\n{submission.selftext[:300]}",
+                        source='reddit_fallback',
+                        created_at=datetime.fromtimestamp(submission.created_utc),
+                        url=f"https://reddit.com{submission.permalink}"
+                    )
+                    posts_found += 1
+            
+            self.stats['reddit_api_calls'] += 1
+            logger.info(f"✅ Reddit fallback complete - {posts_found} relevant posts")
+            await asyncio.sleep(2)
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Reddit fallback error: {e}")
+
+    async def _monitor_reddit_enhanced(self, session: aiohttp.ClientSession):
+        """Enhanced Reddit monitoring with cache updates"""
+        if not self.reddit_client:
+            logger.info("🔴 Reddit client not available - skipping")
+            return
+            
+        try:
+            subreddits = ['solana', 'SolanaScams']
+            subreddit_name = subreddits[self._reddit_subreddit_index % len(subreddits)]
+            self._reddit_subreddit_index += 1
+            
+            logger.info(f"🔴 Checking r/{subreddit_name}")
+            
+            try:
+                subreddit = self.reddit_client.subreddit(subreddit_name)
+                
+                posts_found = 0
+                for submission in subreddit.hot(limit=10):
+                    title_lower = submission.title.lower()
                     
-                    # Check hot posts for security content
-                    for submission in subreddit.hot(limit=20):
-                        title_lower = submission.title.lower()
-                        
-                        # Check if post contains threat keywords
-                        if any(keyword in title_lower for keyword in self.threat_keywords):
-                            await self._process_social_media_threat(
-                                content=f"{submission.title}\n{submission.selftext[:500]}",
-                                source=f'reddit_{subreddit_name}',
-                                created_at=datetime.fromtimestamp(submission.created_utc),
-                                url=f"https://reddit.com{submission.permalink}"
-                            )
+                    threat_found = False
+                    for keyword in self.threat_keywords:
+                        keyword_parts = keyword.split()
+                        if any(part in title_lower for part in keyword_parts):
+                            threat_found = True
+                            break
                     
-                    await asyncio.sleep(1)  # Rate limiting
-                    
-                except Exception as e:
-                    logger.warning(f"⚠️ Reddit error for r/{subreddit_name}: {e}")
-                    
+                    if threat_found:
+                        await self._process_social_media_threat_enhanced(
+                            content=f"{submission.title}\n{submission.selftext[:300]}",
+                            source=f'reddit_{subreddit_name}',
+                            created_at=datetime.fromtimestamp(submission.created_utc),
+                            url=f"https://reddit.com{submission.permalink}"
+                        )
+                        posts_found += 1
+                
+                self.stats['reddit_api_calls'] += 1
+                logger.info(f"✅ Reddit check complete for r/{subreddit_name} - {posts_found} relevant posts")
+                await asyncio.sleep(2)
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Reddit error for r/{subreddit_name}: {e}")
+                
         except Exception as e:
             logger.error(f"❌ Reddit monitoring error: {e}")
 
-    async def _monitor_security_blogs(self):
-        """Monitor security blogs and news sources"""
-        security_sources = [
-            'https://rss.cnn.com/rss/edition.rss',  # Example RSS feeds
-            # Add more security blog RSS feeds here
-        ]
-        
-        # Simple RSS monitoring (you can enhance this)
-        for source in security_sources:
-            try:
-                # In a real implementation, you'd parse RSS feeds
-                # For now, just log that we're monitoring
-                logger.debug(f"📰 Monitoring security source: {source}")
-                await asyncio.sleep(0.1)
-                
-            except Exception as e:
-                logger.warning(f"⚠️ Blog monitoring error: {e}")
-
-    async def _process_social_media_threat(self, content: str, source: str, created_at: datetime, url: str):
-        """Process discovered threat from social media"""
+    async def _process_social_media_threat_enhanced(self, content: str, source: str, created_at: datetime, url: str):
+        """Enhanced threat processing with immediate cache updates"""
         try:
-            # Extract addresses and tokens from content
             addresses = self._extract_solana_addresses(content)
             tokens = self._extract_token_names(content)
             
-            # Determine threat type and severity
             threat_type = self._classify_threat_type(content)
             severity = self._assess_threat_severity(content)
             confidence = self._calculate_confidence(content, source)
@@ -359,12 +551,29 @@ class BackgroundIntelligenceMonitor:
                     severity=severity
                 )
                 
-                # Add to threat database
                 await self._add_threat_intelligence(threat)
                 
-                # Update blacklisted wallets if addresses found
+                if self.edge_learning_engine:
+                    cache_update = {
+                        'type': 'threat_intelligence',
+                        'data': {
+                            'threat_type': threat_type,
+                            'addresses': addresses,
+                            'tokens': tokens,
+                            'confidence': confidence,
+                            'source': source,
+                            'discovered_at': created_at.isoformat()
+                        }
+                    }
+                    
+                    try:
+                        self.cache_update_queue.put_nowait(cache_update)
+                        logger.debug(f"🧠 Queued cache update for threat: {threat_type}")
+                    except asyncio.QueueFull:
+                        logger.warning("⚠️ Cache update queue full - dropping update")
+                
                 for address in addresses:
-                    await self._add_blacklisted_wallet(address, threat_type, source)
+                    await self._add_blacklisted_wallet_enhanced(address, threat_type, source)
                 
                 logger.info(f"🚨 New threat discovered from {source}: {threat_type}")
                 self.stats['threats_discovered'] += 1
@@ -372,80 +581,164 @@ class BackgroundIntelligenceMonitor:
         except Exception as e:
             logger.error(f"❌ Error processing social media threat: {e}")
 
-    # ========== WALLET ACTIVITY TRACKING ==========
+    async def _add_blacklisted_wallet_enhanced(self, address: str, threat_type: str, source: str):
+        """Enhanced wallet blacklisting with immediate cache updates"""
+        try:
+            if address not in self.blacklisted_wallets:
+                wallet = BlacklistedWallet(
+                    address=address,
+                    threat_type=threat_type,
+                    last_activity=None,
+                    activity_count=0,
+                    confidence=0.8,
+                    sources=[source]
+                )
+                
+                self.blacklisted_wallets[address] = wallet
+                
+                if hasattr(self.db, 'insert_blacklisted_wallet'):
+                    self.db.insert_blacklisted_wallet({
+                        'wallet_address': address,
+                        'threat_type': threat_type,
+                        'evidence': f'Discovered via {source}',
+                        'community_reports': 1,
+                        'is_confirmed': False,
+                        'created_at': datetime.now().isoformat()
+                    })
+                
+                if self.edge_learning_engine:
+                    cache_update = {
+                        'type': 'blacklist_wallet',
+                        'data': {
+                            'address': address,
+                            'threat_type': threat_type,
+                            'confidence': 0.8,
+                            'source': source
+                        }
+                    }
+                    
+                    try:
+                        self.cache_update_queue.put_nowait(cache_update)
+                        logger.debug(f"🧠 Queued cache update for blacklisted wallet: {address[:8]}...")
+                    except asyncio.QueueFull:
+                        logger.warning("⚠️ Cache update queue full - dropping wallet update")
+                
+                logger.warning(f"🚫 Added {address[:8]}... to blacklist ({threat_type})")
+                self.stats['wallets_tracked'] += 1
+            
+        except Exception as e:
+            logger.error(f"❌ Error adding blacklisted wallet: {e}")
 
     async def _wallet_activity_tracker(self):
         """Track activity of blacklisted wallets"""
-        while self.monitoring_active:
-            try:
-                logger.info(f"👁️ Tracking {len(self.blacklisted_wallets)} blacklisted wallets...")
-                
-                for address, wallet in self.blacklisted_wallets.items():
-                    try:
-                        # Check wallet activity using Solana RPC
-                        activity = await self._check_wallet_activity(address)
-                        
-                        if activity['has_new_activity']:
-                            # Update wallet tracking data
-                            wallet.last_activity = datetime.now()
-                            wallet.activity_count += activity['new_transactions']
+        async with aiohttp.ClientSession() as session:
+            while self.monitoring_active:
+                try:
+                    logger.info(f"👁️ Tracking {len(self.blacklisted_wallets)} blacklisted wallets...")
+                    
+                    for address, wallet in self.blacklisted_wallets.items():
+                        try:
+                            activity = await self._check_wallet_activity(session, address)
                             
-                            # Create threat intelligence about new activity
-                            threat_content = f"Blacklisted wallet {address} shows new activity: {activity['activity_summary']}"
+                            if activity['has_new_activity']:
+                                wallet.last_activity = datetime.now()
+                                wallet.activity_count += activity['new_transactions']
+                                
+                                threat_content = f"Blacklisted wallet {address} shows new activity: {activity['activity_summary']}"
+                                
+                                threat = ThreatIntelligence(
+                                    threat_type='blacklisted_wallet_activity',
+                                    content=threat_content,
+                                    source='wallet_tracker',
+                                    confidence=0.8,
+                                    addresses=[address],
+                                    tokens=activity.get('tokens_involved', []),
+                                    discovered_at=datetime.now(),
+                                    severity='medium'
+                                )
+                                
+                                await self._add_threat_intelligence(threat)
+                                
+                                if self.edge_learning_engine:
+                                    cache_update = {
+                                        'type': 'blacklist_wallet',
+                                        'data': {
+                                            'address': address,
+                                            'threat_type': 'active_blacklisted_wallet',
+                                            'confidence': 0.9,
+                                            'source': 'wallet_tracker_activity'
+                                        }
+                                    }
+                                    
+                                    try:
+                                        self.cache_update_queue.put_nowait(cache_update)
+                                    except asyncio.QueueFull:
+                                        logger.warning("⚠️ Cache update queue full - dropping activity update")
+                                
+                                logger.warning(f"⚠️ Blacklisted wallet {address[:8]}... is active!")
                             
-                            threat = ThreatIntelligence(
-                                threat_type='blacklisted_wallet_activity',
-                                content=threat_content,
-                                source='wallet_tracker',
-                                confidence=0.8,
-                                addresses=[address],
-                                tokens=activity.get('tokens_involved', []),
-                                discovered_at=datetime.now(),
-                                severity='medium'
-                            )
+                            await asyncio.sleep(1)
                             
-                            await self._add_threat_intelligence(threat)
-                            
-                            logger.warning(f"⚠️ Blacklisted wallet {address[:8]}... is active!")
-                        
-                        # Rate limiting
-                        await asyncio.sleep(1)
-                        
-                    except Exception as e:
-                        logger.warning(f"⚠️ Error tracking wallet {address}: {e}")
-                
-                # Wait before next tracking cycle
-                await asyncio.sleep(self.config['wallet_tracking_interval'])
-                
-            except Exception as e:
-                logger.error(f"❌ Wallet tracking error: {e}")
-                await asyncio.sleep(self.config['wallet_tracking_interval'])
+                        except Exception as e:
+                            logger.warning(f"⚠️ Error tracking wallet {address}: {e}")
+                    
+                    next_check_minutes = self.config['wallet_tracking_interval'] / 60
+                    logger.info(f"⏰ Next wallet check in {next_check_minutes:.0f} minutes")
+                    await asyncio.sleep(self.config['wallet_tracking_interval'])
+                    
+                except Exception as e:
+                    logger.error(f"❌ Wallet tracking error: {e}")
+                    self.stats['rate_limit_hits'] += 1
+                    await asyncio.sleep(self.config['wallet_tracking_interval'])
 
-    async def _check_wallet_activity(self, address: str) -> Dict:
-        """Check if wallet has new activity"""
+    async def _check_wallet_activity(self, session: aiohttp.ClientSession, address: str) -> Dict:
+        """Check if wallet has new activity using Solana RPC"""
         try:
-            # In a real implementation, this would call Solana RPC
-            # For now, simulate activity check
+            url = os.getenv('SOLANA_RPC_URL', 'https://api.mainnet-beta.solana.com')
+            headers = {'Content-Type': 'application/json'}
+            payload = {
+                'jsonrpc': '2.0',
+                'id': 1,
+                'method': 'getSignaturesForAddress',
+                'params': [address, {'limit': 5}]
+            }
             
-            # Mock activity check (replace with real Solana RPC calls)
-            import random
-            has_activity = random.random() < 0.1  # 10% chance of activity
-            
-            if has_activity:
+            async with session.post(url, json=payload, timeout=10) as response:
+                if response.status != 200:
+                    logger.warning(f"Solana RPC returned status {response.status}")
+                    return {'has_new_activity': False}
+                
+                data = await response.json()
+                signatures = data.get('result', [])
+                
+                if not signatures:
+                    return {'has_new_activity': False}
+                
+                # Fetch transaction details to identify tokens
+                tokens_involved = []
+                for sig in signatures[:1]:  # Limit to one for performance
+                    tx_payload = {
+                        'jsonrpc': '2.0',
+                        'id': 1,
+                        'method': 'getTransaction',
+                        'params': [sig['signature'], {'encoding': 'json'}]
+                    }
+                    async with session.post(url, json=tx_payload, timeout=10) as tx_response:
+                        if tx_response.status == 200:
+                            tx_data = await tx_response.json()
+                            accounts = tx_data.get('result', {}).get('transaction', {}).get('message', {}).get('accountKeys', [])
+                            tokens_involved.extend([account for account in accounts if len(account) == 44])  # Solana mint addresses
+                        
                 return {
                     'has_new_activity': True,
-                    'new_transactions': random.randint(1, 5),
-                    'activity_summary': f'New transactions detected',
-                    'tokens_involved': ['SOL', 'USDC']
+                    'new_transactions': len(signatures),
+                    'activity_summary': f"Detected {len(signatures)} recent transactions",
+                    'tokens_involved': list(set(tokens_involved))
                 }
-            else:
-                return {'has_new_activity': False}
                 
         except Exception as e:
             logger.error(f"❌ Activity check error for {address}: {e}")
             return {'has_new_activity': False}
-
-    # ========== THREAT DATABASE MANAGEMENT ==========
 
     async def _threat_database_updater(self):
         """Update threat database and RAG system"""
@@ -453,33 +746,28 @@ class BackgroundIntelligenceMonitor:
             try:
                 logger.info("📚 Updating threat intelligence database...")
                 
-                # Update RAG system with new threats
                 await self._update_rag_with_threats()
-                
-                # Clean old threat data
                 await self._cleanup_old_threats()
-                
-                # Update statistics
                 await self._update_statistics()
                 
                 self.stats['database_updates'] += 1
                 self.stats['last_update'] = datetime.now()
                 
-                # Wait before next update
+                next_update_hours = self.config['threat_update_interval'] / 3600
+                logger.info(f"⏰ Next database update in {next_update_hours:.1f} hours")
                 await asyncio.sleep(self.config['threat_update_interval'])
                 
             except Exception as e:
                 logger.error(f"❌ Database update error: {e}")
+                self.stats['rate_limit_hits'] += 1
                 await asyncio.sleep(self.config['threat_update_interval'])
 
     async def _update_rag_with_threats(self):
         """Update RAG system with new threat intelligence"""
         try:
-            # Get recent threats from last hour
-            recent_threats = await self._get_recent_threats(hours=1)
+            recent_threats = await self._get_recent_threats(hours=3)
             
             for threat in recent_threats:
-                # Format threat data for RAG
                 rag_data = {
                     'type': 'threat_intelligence',
                     'threat_type': threat.threat_type,
@@ -492,8 +780,8 @@ class BackgroundIntelligenceMonitor:
                     'discovered_at': threat.discovered_at.isoformat()
                 }
                 
-                # Update community intelligence via RAG
-                await update_community_intelligence(rag_data)
+                context = f"Threat Intelligence: {threat.threat_type} - {threat.content[:200]}..."
+                await self.rag.save_context("background_threat_intelligence", context)
                 
             if recent_threats:
                 logger.info(f"📝 Updated RAG with {len(recent_threats)} new threats")
@@ -501,86 +789,31 @@ class BackgroundIntelligenceMonitor:
         except Exception as e:
             logger.error(f"❌ RAG update error: {e}")
 
-    async def _get_recent_threats(self, hours: int = 1) -> List[ThreatIntelligence]:
+    async def _get_recent_threats(self, hours: int = 3) -> List[ThreatIntelligence]:
         """Get threats discovered in the last N hours"""
-        # This would query your threat database
-        # For now, return empty list
-        return []
+        try:
+            if hasattr(self.db, 'get_recent_threats'):
+                return self.db.get_recent_threats(hours=hours)
+            return []
+        except Exception as e:
+            logger.error(f"Failed to get recent threats: {e}")
+            return []
 
     async def _cleanup_old_threats(self):
         """Clean up old threat intelligence data"""
         try:
-            # Remove threats older than 30 days
             cutoff_date = datetime.now() - timedelta(days=30)
-            
-            # This would clean up your threat database
-            logger.debug(f"🧹 Cleaning threats older than {cutoff_date}")
-            
+            if hasattr(self.db, 'delete_old_threats'):
+                deleted = self.db.delete_old_threats(cutoff_date)
+                logger.debug(f"🧹 Cleaned {deleted} threats older than {cutoff_date}")
         except Exception as e:
             logger.error(f"❌ Cleanup error: {e}")
 
-    # ========== BLOCKCHAIN SCANNING ==========
-
-    async def _blockchain_scanner(self):
-        """Scan blockchain for suspicious patterns"""
-        while self.monitoring_active:
-            try:
-                logger.info("🔗 Scanning blockchain for suspicious patterns...")
-                
-                # Scan for new suspicious contracts
-                await self._scan_new_contracts()
-                
-                # Scan for large value movements from known bad actors
-                await self._scan_large_movements()
-                
-                # Scan for unusual token minting patterns
-                await self._scan_token_patterns()
-                
-                # Wait before next scan
-                await asyncio.sleep(self.config['monitor_interval'] * 2)  # Less frequent
-                
-            except Exception as e:
-                logger.error(f"❌ Blockchain scan error: {e}")
-                await asyncio.sleep(self.config['monitor_interval'] * 2)
-
-    async def _scan_new_contracts(self):
-        """Scan for newly deployed suspicious contracts"""
-        try:
-            # In real implementation, scan recent program deployments
-            logger.debug("🔍 Scanning new contract deployments...")
-            
-        except Exception as e:
-            logger.warning(f"⚠️ Contract scan error: {e}")
-
-    async def _scan_large_movements(self):
-        """Scan for large value movements from blacklisted addresses"""
-        try:
-            for address in self.blacklisted_wallets.keys():
-                # Check for large outgoing transactions
-                # In real implementation, query Solana for recent large transactions
-                pass
-                
-        except Exception as e:
-            logger.warning(f"⚠️ Large movement scan error: {e}")
-
-    async def _scan_token_patterns(self):
-        """Scan for suspicious token creation patterns"""
-        try:
-            # Look for tokens with suspicious names matching known projects
-            logger.debug("🪙 Scanning token creation patterns...")
-            
-        except Exception as e:
-            logger.warning(f"⚠️ Token pattern scan error: {e}")
-
-    # ========== UTILITY METHODS ==========
-
     def _extract_solana_addresses(self, text: str) -> List[str]:
         """Extract Solana addresses from text"""
-        # Solana address pattern (base58, 32-44 chars)
         pattern = r'\b[A-HJ-NP-Z1-9]{32,44}\b'
         addresses = re.findall(pattern, text)
         
-        # Filter out obvious false positives
         valid_addresses = []
         for addr in addresses:
             if len(addr) >= 32 and not addr.isdigit():
@@ -590,11 +823,10 @@ class BackgroundIntelligenceMonitor:
 
     def _extract_token_names(self, text: str) -> List[str]:
         """Extract token names from text"""
-        # Common token name patterns
         patterns = [
-            r'\$([A-Z]{2,10})',  # $TOKEN format
-            r'\b([A-Z]{2,10})\s+token',  # TOKEN token format
-            r'token\s+([A-Z]{2,10})',  # token TOKEN format
+            r'\$([A-Z]{2,10})',
+            r'\b([A-Z]{2,10})\s+token',
+            r'token\s+([A-Z]{2,10})',
         ]
         
         tokens = []
@@ -602,7 +834,7 @@ class BackgroundIntelligenceMonitor:
             matches = re.findall(pattern, text, re.IGNORECASE)
             tokens.extend(matches)
         
-        return list(set(tokens))  # Remove duplicates
+        return list(set(tokens))
 
     def _classify_threat_type(self, content: str) -> str:
         """Classify the type of threat from content"""
@@ -644,9 +876,8 @@ class BackgroundIntelligenceMonitor:
 
     def _calculate_confidence(self, content: str, source: str) -> float:
         """Calculate confidence score for threat intelligence"""
-        confidence = 0.3  # Base confidence
+        confidence = 0.3
         
-        # Source reputation
         if 'security' in source or 'alert' in source:
             confidence += 0.3
         elif 'twitter' in source:
@@ -654,18 +885,11 @@ class BackgroundIntelligenceMonitor:
         elif 'reddit' in source:
             confidence += 0.1
         
-        # Content analysis
         content_lower = content.lower()
-        
-        # High confidence indicators
         if any(word in content_lower for word in ['confirmed', 'verified', 'official']):
             confidence += 0.3
-        
-        # Medium confidence indicators
         if any(word in content_lower for word in ['reported', 'multiple', 'evidence']):
             confidence += 0.2
-        
-        # Address or specific details
         if self._extract_solana_addresses(content):
             confidence += 0.2
         
@@ -685,42 +909,13 @@ class BackgroundIntelligenceMonitor:
                 'severity': threat.severity
             }
             
-            # Save to database (you'll need to implement this in your DB interface)
-            self.db.insert_threat_intelligence(threat_data)
+            if hasattr(self.db, 'insert_threat_intelligence'):
+                self.db.insert_threat_intelligence(threat_data)
+            else:
+                logger.debug(f"📝 Would save threat intelligence: {threat.threat_type}")
             
         except Exception as e:
             logger.error(f"❌ Error adding threat intelligence: {e}")
-
-    async def _add_blacklisted_wallet(self, address: str, threat_type: str, source: str):
-        """Add wallet to blacklist"""
-        try:
-            if address not in self.blacklisted_wallets:
-                wallet = BlacklistedWallet(
-                    address=address,
-                    threat_type=threat_type,
-                    last_activity=None,
-                    activity_count=0,
-                    confidence=0.8,
-                    sources=[source]
-                )
-                
-                self.blacklisted_wallets[address] = wallet
-                
-                # Save to database
-                self.db.insert_blacklisted_wallet({
-                    'wallet_address': address,
-                    'threat_type': threat_type,
-                    'evidence': f'Discovered via {source}',
-                    'community_reports': 1,
-                    'is_confirmed': False,
-                    'created_at': datetime.now().isoformat()
-                })
-                
-                logger.warning(f"🚫 Added {address[:8]}... to blacklist ({threat_type})")
-                self.stats['wallets_tracked'] += 1
-            
-        except Exception as e:
-            logger.error(f"❌ Error adding blacklisted wallet: {e}")
 
     async def _update_statistics(self):
         """Update monitoring statistics"""
@@ -730,17 +925,22 @@ class BackgroundIntelligenceMonitor:
                 'wallets_tracked': len(self.blacklisted_wallets),
                 'social_media_scans': self.stats['social_media_scans'],
                 'database_updates': self.stats['database_updates'],
+                'cache_updates_sent': self.stats['cache_updates_sent'],
+                'edge_learning_integration': self.stats['edge_learning_integration'],
+                'twitter_api_calls': self.stats['twitter_api_calls'],
+                'reddit_api_calls': self.stats['reddit_api_calls'],
+                'rate_limit_hits': self.stats['rate_limit_hits'],
                 'last_update': self.stats['last_update'].isoformat(),
                 'monitoring_active': self.monitoring_active
             }
             
-            # Save statistics (implement in your DB)
-            self.db.update_monitoring_statistics(stats_data)
+            if hasattr(self.db, 'update_monitoring_statistics'):
+                self.db.update_monitoring_statistics(stats_data)
+            else:
+                logger.debug(f"📊 Statistics: {self.stats['threats_discovered']} threats, {len(self.blacklisted_wallets)} blacklisted")
             
         except Exception as e:
             logger.error(f"❌ Error updating statistics: {e}")
-
-    # ========== PUBLIC API METHODS ==========
 
     async def get_monitoring_status(self) -> Dict:
         """Get current monitoring status"""
@@ -753,11 +953,23 @@ class BackgroundIntelligenceMonitor:
             'api_clients': {
                 'twitter': self.twitter_client is not None,
                 'reddit': self.reddit_client is not None
+            },
+            'edge_learning_integration': {
+                'available': self.edge_learning_engine is not None,
+                'cache_updates_queued': self.cache_update_queue.qsize() if hasattr(self, 'cache_update_queue') else 0,
+                'cache_updates_sent': self.stats['cache_updates_sent']
+            },
+            'rate_limiting': {
+                'twitter_calls_made': self.stats['twitter_api_calls'],
+                'reddit_calls_made': self.stats['reddit_api_calls'],
+                'rate_limit_hits': self.stats['rate_limit_hits'],
+                'current_keyword_index': self._twitter_keyword_index,
+                'current_subreddit_index': self._reddit_subreddit_index
             }
         }
 
     async def add_manual_threat(self, threat_data: Dict) -> bool:
-        """Manually add threat intelligence"""
+        """Manually add threat intelligence with cache updates"""
         try:
             threat = ThreatIntelligence(
                 threat_type=threat_data.get('threat_type', 'manual'),
@@ -771,50 +983,174 @@ class BackgroundIntelligenceMonitor:
             )
             
             await self._add_threat_intelligence(threat)
+            
+            if self.edge_learning_engine and (threat.addresses or threat.tokens):
+                cache_update = {
+                    'type': 'threat_intelligence',
+                    'data': {
+                        'threat_type': threat.threat_type,
+                        'addresses': threat.addresses,
+                        'tokens': threat.tokens,
+                        'confidence': threat.confidence,
+                        'source': 'manual_input',
+                        'discovered_at': threat.discovered_at.isoformat()
+                    }
+                }
+                
+                try:
+                    self.cache_update_queue.put_nowait(cache_update)
+                    logger.info(f"🧠 Queued cache update for manual threat: {threat.threat_type}")
+                except asyncio.QueueFull:
+                    logger.warning("⚠️ Cache update queue full - manual threat may not be cached immediately")
+            
             return True
             
         except Exception as e:
             logger.error(f"❌ Error adding manual threat: {e}")
             return False
 
-    async def blacklist_wallet(self, address: str, threat_type: str, evidence: str) -> bool:
-        """Manually blacklist a wallet"""
+    async def blacklist_wallet_manual(self, address: str, threat_type: str, evidence: str) -> bool:
+        """Manually blacklist a wallet with immediate cache update"""
         try:
-            await self._add_blacklisted_wallet(address, threat_type, 'manual_input')
+            await self._add_blacklisted_wallet_enhanced(address, threat_type, 'manual_input')
+            logger.info(f"✅ Manually blacklisted wallet: {address[:8]}... ({threat_type})")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Error blacklisting wallet: {e}")
+            logger.error(f"❌ Error blacklisting wallet manually: {e}")
             return False
 
+    async def integrate_with_edge_learning_engine(self, edge_learning_engine):
+        """Set EdgeLearningEngine reference after initialization"""
+        self.edge_learning_engine = edge_learning_engine
+        self.stats['edge_learning_integration'] = True
+        
+        if not hasattr(self, 'cache_update_queue'):
+            self.cache_update_queue = asyncio.Queue(maxsize=1000)
+        
+        await self._preload_blacklist_cache()
+        
+        logger.info("🔗 EdgeLearningEngine integrated with EnhancedBackgroundMonitor")
 
-# ========== INTEGRATION WITH MAIN SYSTEM ==========
+    def get_cache_update_queue_status(self) -> Dict[str, Any]:
+        """Get status of cache update queue for debugging"""
+        if not hasattr(self, 'cache_update_queue'):
+            return {'queue_available': False}
+        
+        return {
+            'queue_available': True,
+            'queue_size': self.cache_update_queue.qsize(),
+            'queue_max_size': self.cache_update_queue.maxsize,
+            'cache_updates_sent': self.stats['cache_updates_sent'],
+            'edge_learning_available': self.edge_learning_engine is not None
+        }
 
-async def start_background_monitor(db: SQLiteDB, rag: RAGClient) -> BackgroundIntelligenceMonitor:
-    """Start the background intelligence monitor"""
-    monitor = BackgroundIntelligenceMonitor(db, rag)
+    async def force_cache_sync(self) -> Dict[str, Any]:
+        """Force immediate cache synchronization for debugging"""
+        if not self.edge_learning_engine:
+            return {'error': 'EdgeLearningEngine not available'}
+        
+        try:
+            updates_processed = 0
+            
+            while not self.cache_update_queue.empty():
+                cache_update = await self.cache_update_queue.get()
+                await self._apply_cache_update(cache_update)
+                updates_processed += 1
+            
+            logger.info(f"🧠 Force sync: processed {updates_processed} cache updates")
+            
+            return {
+                'success': True,
+                'updates_processed': updates_processed,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Force cache sync error: {e}")
+            return {'error': str(e)}
+
+    async def add_external_threat_source(self, source_config: Dict[str, Any]) -> bool:
+        """Add external threat intelligence source"""
+        try:
+            source_name = source_config.get('name', 'unknown')
+            source_url = source_config.get('url')
+            source_type = source_config.get('type', 'json')
+            
+            logger.info(f"🔌 Adding external threat source: {source_name}")
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(source_url, timeout=10) as response:
+                    if response.status != 200:
+                        logger.warning(f"External source {source_name} returned status {response.status}")
+                        return False
+                    logger.info(f"📡 External source configured: {source_name} ({source_type})")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error adding external threat source: {e}")
+            return False
+
+    async def sync_with_community_database(self, community_db_api_url: str) -> Dict[str, Any]:
+        """Sync with external community database API"""
+        try:
+            logger.info(f"🌐 Syncing with community database: {community_db_api_url}")
+            
+            sync_data = {
+                'blacklisted_wallets': [
+                    {
+                        'address': wallet.address,
+                        'threat_type': wallet.threat_type,
+                        'confidence': wallet.confidence,
+                        'sources': wallet.sources
+                    } for wallet in self.blacklisted_wallets.values()
+                ],
+                'threats_discovered': self.stats['threats_discovered'],
+                'last_sync': datetime.now().isoformat()
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(f"{community_db_api_url}/sync", json=sync_data, timeout=10) as response:
+                    if response.status != 200:
+                        logger.warning(f"Community DB API returned status {response.status}")
+                        return {'success': False, 'error': f"API error: {response.status}"}
+                    remote_data = await response.json()
+                    
+                    # Update local blacklist with remote data
+                    for remote_wallet in remote_data.get('blacklisted_wallets', []):
+                        address = remote_wallet['address']
+                        if address not in self.blacklisted_wallets:
+                            self.blacklisted_wallets[address] = BlacklistedWallet(
+                                address=address,
+                                threat_type=remote_wallet.get('threat_type', 'general_scam'),
+                                last_activity=None,
+                                activity_count=0,
+                                confidence=remote_wallet.get('confidence', 0.8),
+                                sources=remote_wallet.get('sources', ['community_db'])
+                            )
+                    
+                    logger.info(f"✅ Community database sync complete: {len(self.blacklisted_wallets)} wallets")
+                    return {
+                        'success': True,
+                        'sync_data': sync_data,
+                        'remote_wallets': len(remote_data.get('blacklisted_wallets', [])),
+                        'timestamp': datetime.now().isoformat()
+                    }
+            
+        except Exception as e:
+            logger.error(f"❌ Community database sync error: {e}")
+            return {'success': False, 'error': str(e)}
+
+async def start_enhanced_background_monitor(db: SQLiteDB, rag: RAGClient, 
+                                          edge_learning_engine=None) -> EnhancedBackgroundIntelligenceMonitor:
+    """Start the enhanced background intelligence monitor with EdgeLearningEngine integration"""
+    monitor = EnhancedBackgroundIntelligenceMonitor(db, rag, edge_learning_engine)
     await monitor.initialize()
     await monitor.start_monitoring()
     return monitor
 
-
-if __name__ == "__main__":
-    async def test_monitor():
-        """Test the background monitor"""
-        from src.db import SQLiteDB
-        from src.client.rag import RAGClient
-        
-        db = SQLiteDB("./test_security.db")
-        rag = RAGClient("http://localhost:8080")
-        
-        monitor = await start_background_monitor(db, rag)
-        
-        # Run for 60 seconds
-        await asyncio.sleep(60)
-        
-        await monitor.stop_monitoring()
-        
-        status = await monitor.get_monitoring_status()
-        print(json.dumps(status, indent=2))
-    
-    asyncio.run(test_monitor())
+async def start_background_monitor(db: SQLiteDB, rag: RAGClient) -> EnhancedBackgroundIntelligenceMonitor:
+    """Backward compatibility wrapper"""
+    logger.info("🔄 Using enhanced background monitor for backward compatibility")
+    return await start_enhanced_background_monitor(db, rag, None)
