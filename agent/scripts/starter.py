@@ -1,4 +1,3 @@
-
 import asyncio
 import os
 import json
@@ -448,21 +447,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ========== API KEY AUTHENTICATION ==========
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-async def verify_api_key(x_api_key: str = Depends(api_key_header)):
-    valid_api_keys = os.getenv("VALID_API_KEYS", "").split(",")
-    if not x_api_key or x_api_key not in valid_api_keys:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-    return x_api_key
-
-# ========== ENHANCED API ENDPOINTS ==========
+# ========== ENHANCED API ENDPOINTS (NO AUTHENTICATION) ==========
 @app.post("/api/v1/analyze-transaction", response_model=SecurityResponse)
-async def analyze_transaction_endpoint(
-    request: TransactionRequest,
-    x_api_key: str = Depends(verify_api_key)
-):
+async def analyze_transaction_endpoint(request: TransactionRequest):
     """Instant transaction analysis using cached intelligence"""
     start_time = datetime.now()
     
@@ -545,7 +532,7 @@ async def analyze_transaction_endpoint(
         )
 
 @app.post("/api/v1/user-feedback")
-async def submit_user_feedback(request: UserFeedbackRequest, x_api_key: str = Depends(verify_api_key)):
+async def submit_user_feedback(request: UserFeedbackRequest):
     """Submit user feedback for background learning"""
     try:
         if not security_agent:
@@ -573,7 +560,7 @@ async def submit_user_feedback(request: UserFeedbackRequest, x_api_key: str = De
         raise HTTPException(status_code=500, detail=f"Failed to submit feedback: {str(e)}")
 
 @app.get("/api/v1/intelligence-status")
-async def get_intelligence_status(x_api_key: str = Depends(verify_api_key)):
+async def get_intelligence_status():
     """Get EdgeLearningEngine status and metrics"""
     try:
         if not security_agent or not edge_learning_engine:
@@ -606,7 +593,7 @@ async def get_intelligence_status(x_api_key: str = Depends(verify_api_key)):
         return {"error": str(e), "edge_learning_available": False}
 
 @app.post("/api/v1/force-refresh")
-async def force_intelligence_refresh(target_data: Dict[str, Any], x_api_key: str = Depends(verify_api_key)):
+async def force_intelligence_refresh(target_data: Dict[str, Any]):
     """Force intelligence refresh for debugging"""
     try:
         if not security_agent:
@@ -625,7 +612,7 @@ async def force_intelligence_refresh(target_data: Dict[str, Any], x_api_key: str
         raise HTTPException(status_code=500, detail=f"Force refresh failed: {str(e)}")
 
 @app.post("/api/v1/register-wallet")
-async def register_wallet_for_monitoring(request: WalletRegistrationRequest, x_api_key: str = Depends(verify_api_key)):
+async def register_wallet_for_monitoring(request: WalletRegistrationRequest):
     """Register a wallet address for real-time monitoring"""
     try:
         if not security_agent:
@@ -654,7 +641,7 @@ async def register_wallet_for_monitoring(request: WalletRegistrationRequest, x_a
         raise HTTPException(status_code=500, detail=f"Failed to register wallet: {str(e)}")
 
 @app.post("/api/v1/analyze-wallet")
-async def analyze_wallet_endpoint(request: WalletAnalysisRequest, x_api_key: str = Depends(verify_api_key)):
+async def analyze_wallet_endpoint(request: WalletAnalysisRequest):
     """Analyze any Solana wallet for security threats with cached intelligence"""
     start_time = datetime.now()
     
@@ -709,7 +696,7 @@ async def analyze_wallet_endpoint(request: WalletAnalysisRequest, x_api_key: str
         }
 
 @app.post("/api/v1/track-wallet")
-async def track_wallet_endpoint(request: WalletTrackingRequest, x_api_key: str = Depends(verify_api_key)):
+async def track_wallet_endpoint(request: WalletTrackingRequest):
     """Add wallet to tracking/monitoring list"""
     try:
         if not security_agent:
@@ -748,10 +735,7 @@ async def track_wallet_endpoint(request: WalletTrackingRequest, x_api_key: str =
         raise HTTPException(status_code=500, detail=f"Failed to track wallet: {str(e)}")
 
 @app.post("/api/v1/process-incoming")
-async def process_incoming_transaction(
-    request: TransactionRequest,
-    x_api_key: str = Depends(verify_api_key)
-):
+async def process_incoming_transaction(request: TransactionRequest):
     """Process incoming transactions for auto-quarantine decisions with cached intelligence"""
     try:
         if not security_agent:
@@ -827,7 +811,7 @@ async def health_check():
     }
 
 @app.get("/api/v1/system-status")
-async def get_system_status(x_api_key: str = Depends(verify_api_key)):
+async def get_system_status():
     """Enhanced system status with EdgeLearningEngine metrics"""
     if not security_agent:
         return {"status": "initializing", "message": "Security system starting up..."}
@@ -882,6 +866,64 @@ async def get_system_status(x_api_key: str = Depends(verify_api_key)):
         
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+# ========== LEGACY ENDPOINTS FOR BACKWARD COMPATIBILITY ==========
+@app.post("/security/analyze")
+async def legacy_analyze_endpoint(request: Dict[str, Any]):
+    """Legacy endpoint for backward compatibility (no auth required)"""
+    try:
+        if not security_agent:
+            raise HTTPException(status_code=503, detail="Security system not initialized")
+        
+        logger.info(f"⚡ Legacy analysis for {request.get('transaction_type', 'unknown')}")
+        
+        analysis_result = await security_agent.analyze_with_ai_code_generation(
+            request, request.get('user_language', 'english')
+        )
+        
+        return {
+            "action": analysis_result.get('action', 'ALLOW'),
+            "risk_score": analysis_result.get('risk_score', 0.0),
+            "confidence": analysis_result.get('confidence', 0.8),
+            "user_explanation": analysis_result.get('user_explanation', ''),
+            "threat_categories": analysis_result.get('threat_categories', []),
+            "chain_of_thought": analysis_result.get('chain_of_thought', []),
+            "analysis_time_ms": analysis_result.get('analysis_time_ms', 0)
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Legacy analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/security/status")
+async def legacy_security_status():
+    """Legacy security status endpoint (no auth required)"""
+    try:
+        if not security_agent:
+            return {"status": "not_initialized"}
+        
+        return {
+            "status": "operational",
+            "security_agent": "active",
+            "edge_learning_engine": edge_learning_engine is not None,
+            "background_monitor": background_monitor is not None,
+            "monitored_wallets": len(security_agent.sensor.wallet_addresses) if security_agent.sensor else 0
+        }
+        
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+@app.get("/security/engine/status")
+async def legacy_engine_status():
+    """Legacy EdgeLearningEngine status endpoint (no auth required)"""
+    try:
+        if not edge_learning_engine:
+            return {"engine_available": False}
+        
+        return edge_learning_engine.get_engine_status()
+        
+    except Exception as e:
+        return {"engine_available": False, "error": str(e)}
 
 # ========== ENHANCED USER CONFIGURATION ==========
 def starter_prompt():

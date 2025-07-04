@@ -61,12 +61,11 @@ except ImportError:
 # For Solana blockchain interactions
 try:
     from solana.rpc.async_api import AsyncClient
-    from solana.publickey import PublicKey
+    from solders.pubkey import Pubkey as PublicKey  # ✅ CORRECT IMPORT PATH
     SOLANA_WEB3_AVAILABLE = True
 except ImportError:
     SOLANA_WEB3_AVAILABLE = False
     print("⚠️ solana-py not installed - using mock transaction data")
-
 
 class SecuritySensor:
     """
@@ -74,7 +73,7 @@ class SecuritySensor:
     and coordinates with SecurityAgent for AI-driven analysis
     """
     
-    def __init__(self, wallet_addresses: List[str], solana_rpc_url: str, rpc_api_key: str = "", rpc_provider_name: str = "Unknown"):
+    def __init__(self, wallet_addresses: List[str], solana_rpc_url: str, rpc_api_key: str = "", rpc_provider_name: str = "Unknown", rag_client=None):
         # Core connection parameters
         self.wallet_addresses = wallet_addresses
         self.solana_rpc_url = solana_rpc_url
@@ -82,8 +81,10 @@ class SecuritySensor:
         self.rpc_provider_name = rpc_provider_name  # Name of the RPC provider
         
         # Initialize your existing analysis modules with correct imports
-        self.community_db = AdaptiveCommunityDatabase() if AdaptiveCommunityDatabase else None
-        self.dust_detector = AdaptiveDustDetector(None) if AdaptiveDustDetector else None  # Now using adaptive version
+        self.community_db = AdaptiveCommunityDatabase(rag_client) if AdaptiveCommunityDatabase else None
+
+        self.dust_detector = AdaptiveDustDetector(rag_client) if AdaptiveDustDetector else None
+
         self.mev_detector = MEVDetector() if MEVDetector else None
         self.contract_analyzer = EnhancedContractAnalyzer() if EnhancedContractAnalyzer else None
         self.contract_explainer = SmartContractExplainer() if SmartContractExplainer else None

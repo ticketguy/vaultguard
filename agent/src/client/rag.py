@@ -1,10 +1,10 @@
-
 from datetime import datetime
 import json
 from loguru import logger
 import aiohttp
+import requests  
 from src.datatypes import StrategyData
-from typing import List, Tuple, TypedDict, Any
+from typing import List, Tuple, TypedDict, Any, Dict  
 import dataclasses
 
 class RAGInsertData(TypedDict):

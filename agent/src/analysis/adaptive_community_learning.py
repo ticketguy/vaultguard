@@ -1,9 +1,9 @@
 """
 Adaptive Community Learning System
-NO HARD-CODED PROJECTS - Everything learned from community
+ Everything learned from community
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import json
 
