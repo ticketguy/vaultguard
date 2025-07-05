@@ -5,8 +5,6 @@ aiohappyeyeballs==2.4.4
 aiohttp==3.11.11
     # via
     #   superior-agent (pyproject.toml)
-    #   langchain
-    #   langchain-community
     #   web3
 aiosignal==1.3.2
     # via aiohttp
@@ -20,15 +18,15 @@ anyio==4.8.0
     #   httpx
     #   openai
     #   starlette
-attrs==24.3.0
+attrs==25.1.0
     # via aiohttp
-beautifulsoup4==4.12.3
+beautifulsoup4==4.13.1
     # via bs4
 bitarray==3.0.0
     # via eth-account
 bs4==0.0.2
     # via superior-agent (pyproject.toml)
-certifi==2024.12.14
+certifi==2025.1.31
     # via
     #   httpcore
     #   httpx
@@ -43,8 +41,6 @@ click==8.1.8
     #   uvicorn
 cytoolz==1.0.1
     # via eth-utils
-dataclasses-json==0.6.7
-    # via langchain-community
 decorator==5.1.1
     # via retry
 distro==1.9.0
@@ -53,52 +49,14 @@ distro==1.9.0
     #   openai
 docker==7.1.0
     # via superior-agent (pyproject.toml)
-duckduckgo-search==7.3.2
-    # via superior-agent (pyproject.toml)
-eth-abi==5.2.0
-    # via
-    #   eth-account
-    #   web3
-eth-account==0.13.5
-    # via web3
-eth-hash==0.7.1
-    # via
-    #   eth-utils
-    #   web3
-eth-keyfile==0.8.1
-    # via eth-account
-eth-keys==0.6.1
-    # via
-    #   eth-account
-    #   eth-keyfile
-eth-rlp==2.2.0
-    # via eth-account
-eth-typing==5.1.0
-    # via
-    #   superior-agent (pyproject.toml)
-    #   eth-abi
-    #   eth-keys
-    #   eth-utils
-    #   web3
-eth-utils==5.2.0
-    # via
-    #   eth-abi
-    #   eth-account
-    #   eth-keyfile
-    #   eth-keys
-    #   eth-rlp
-    #   rlp
-    #   web3
-faiss-cpu==1.9.0.post1
-    # via superior-agent (pyproject.toml)
+duckduckgo-search==7.3.0
+solana
 fastapi==0.115.8
     # via superior-agent (pyproject.toml)
 frozenlist==1.5.0
     # via
     #   aiohttp
     #   aiosignal
-greenlet==3.1.1
-    # via sqlalchemy
 h11==0.14.0
     # via
     #   httpcore
@@ -114,11 +72,8 @@ httpx==0.28.1
     # via
     #   superior-agent (pyproject.toml)
     #   anthropic
-    #   langsmith
     #   ollama
     #   openai
-httpx-sse==0.4.0
-    # via langchain-community
 idna==3.10
     # via
     #   anyio
@@ -129,74 +84,31 @@ jiter==0.8.2
     # via
     #   anthropic
     #   openai
-jsonpatch==1.33
-    # via langchain-core
-jsonpointer==3.0.0
-    # via jsonpatch
-langchain==0.3.15
-    # via
-    #   superior-agent (pyproject.toml)
-    #   langchain-community
-langchain-community==0.3.15
-    # via superior-agent (pyproject.toml)
-langchain-core==0.3.31
-    # via
-    #   langchain
-    #   langchain-community
-    #   langchain-openai
-    #   langchain-text-splitters
-langchain-openai==0.3.1
-    # via superior-agent (pyproject.toml)
-langchain-text-splitters==0.3.5
-    # via langchain
-langsmith==0.2.11
-    # via
-    #   langchain
-    #   langchain-community
-    #   langchain-core
 loguru==0.7.3
     # via superior-agent (pyproject.toml)
 lxml==5.3.0
     # via duckduckgo-search
-marshmallow==3.25.1
-    # via dataclasses-json
 multidict==6.1.0
     # via
     #   aiohttp
     #   yarl
-mypy-extensions==1.0.0
-    # via typing-inspect
-numpy==1.26.4
-    # via
-    #   faiss-cpu
-    #   langchain
-    #   langchain-community
 oauthlib==3.2.2
     # via
     #   requests-oauthlib
     #   tweepy
 ollama==0.4.7
     # via superior-agent (pyproject.toml)
-openai==1.63.0
-    # via
-    #   superior-agent (pyproject.toml)
-    #   langchain-openai
-orjson==3.10.15
-    # via langsmith
-packaging==24.2
-    # via
-    #   faiss-cpu
-    #   langchain-core
-    #   marshmallow
+openai==1.60.2
+    # via superior-agent (pyproject.toml)
 parsimonious==0.10.0
     # via eth-abi
-peewee==3.17.9
+peewee==3.17.8
     # via superior-agent (pyproject.toml)
-pip==25.0.1
+pip==25.0
     # via superior-agent (pyproject.toml)
-polars==1.22.0
+polars==1.21.0
     # via superior-agent (pyproject.toml)
-primp==0.12.1
+primp==0.11.0
     # via duckduckgo-search
 propcache==0.2.1
     # via
@@ -214,9 +126,6 @@ pydantic==2.10.6
     #   anthropic
     #   eth-account
     #   fastapi
-    #   langchain
-    #   langchain-core
-    #   langsmith
     #   ollama
     #   openai
     #   pydantic-settings
@@ -224,9 +133,7 @@ pydantic==2.10.6
 pydantic-core==2.27.2
     # via pydantic
 pydantic-settings==2.7.1
-    # via
-    #   superior-agent (pyproject.toml)
-    #   langchain-community
+    # via superior-agent (pyproject.toml)
 pymysql==1.1.1
     # via superior-agent (pyproject.toml)
 python-dotenv==1.0.1
@@ -236,36 +143,23 @@ python-dotenv==1.0.1
 pyunormalize==16.0.0
     # via web3
 pyyaml==6.0.2
-    # via
-    #   superior-agent (pyproject.toml)
-    #   langchain
-    #   langchain-community
-    #   langchain-core
+    # via superior-agent (pyproject.toml)
 regex==2024.11.6
-    # via
-    #   parsimonious
-    #   tiktoken
+    # via parsimonious
 requests==2.32.3
     # via
     #   superior-agent (pyproject.toml)
     #   docker
-    #   langchain
-    #   langchain-community
-    #   langsmith
     #   requests-oauthlib
-    #   requests-toolbelt
-    #   tiktoken
     #   tweepy
     #   web3
 requests-oauthlib==2.0.0
     # via tweepy
-requests-toolbelt==1.0.0
-    # via langsmith
 result==0.17.0
     # via superior-agent (pyproject.toml)
 retry==0.9.2
     # via superior-agent (pyproject.toml)
-rlp==4.1.0
+rlp==4.0.1
     # via
     #   eth-account
     #   eth-rlp
@@ -276,19 +170,8 @@ sniffio==1.3.1
     #   openai
 soupsieve==2.6
     # via beautifulsoup4
-sqlalchemy==2.0.37
-    # via
-    #   langchain
-    #   langchain-community
-starlette==0.41.3
+starlette==0.45.3
     # via fastapi
-tenacity==9.0.0
-    # via
-    #   langchain
-    #   langchain-community
-    #   langchain-core
-tiktoken==0.8.0
-    # via langchain-openai
 toolz==1.0.0
     # via cytoolz
 tqdm==4.67.1
@@ -301,17 +184,13 @@ typing-extensions==4.12.2
     # via
     #   anthropic
     #   anyio
+    #   beautifulsoup4
     #   eth-typing
     #   fastapi
-    #   langchain-core
     #   openai
     #   pydantic
     #   pydantic-core
-    #   sqlalchemy
-    #   typing-inspect
     #   web3
-typing-inspect==0.9.0
-    # via dataclasses-json
 urllib3==2.3.0
     # via
     #   docker
@@ -325,3 +204,33 @@ websockets==13.1
     # via web3
 yarl==1.18.3
     # via aiohttp
+
+
+# Security Analysis
+cryptography>=41.0.0
+web3>=6.0.0
+eth-account>=0.9.0
+solana>=0.30.0
+requests>=2.31.0
+
+# Machine Learning for Security
+scikit-learn>=1.3.0
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Blockchain Analysis
+py-evm>=0.7.0
+eth-hash[pycryptodome]>=0.5.0
+
+# Community Intelligence
+networkx>=3.0
+redis>=4.5.0
+
+# Additional Utils
+pydantic>=2.0.0
+python-dateutil>=2.8.0
+asyncio-throttle>=1.0.0
+EOF
+
+# Install new dependencies
+pip install -e .

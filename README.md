@@ -59,21 +59,21 @@ VaultGuard consists of two main components:
 
 1. Clone the repository:
 
-"""
+
 git clone <https://github.com/ticketguy/vaultguard.git>
 cd vaultguard
-"""
+
 
 2. Run the setup script:
 
-"""
+
 chmod +x bootstrap.sh
 ./bootstrap.sh
-"""
+
 
 3. Configure environment variables:
 
-"""
+
 
 # Copy and edit environment files
 
@@ -82,36 +82,34 @@ cp rag-api/.env.example rag-api/.env
 
 # Edit the .env files with your API keys
 
-"""
-
 ### Manual Setup
 
 1. Set up Python virtual environment:
 
-"""
+
 
 # Create and activate virtual environment
 
-python -m venv agent-venv
-source agent-venv/bin/activate
+python -mvenv venv
+source agent-venv/scripts/activate
 
 # Install agent dependencies
 
 cd agent
-pip install -e .
+pip install -r requirements.txt
 cd ..
-"""
+
 
 2. Set up RAG API:
 
-"""
+
 
 # Install RAG API dependencies
 
 cd rag-api
 pip install -r requirements.txt
 cd ..
-"""
+
 
 ## Quick Start
 
@@ -119,17 +117,16 @@ cd ..
 
 Terminal 1 - Start RAG API:
 
-"""
 cd rag-api
 python scripts/api.py
-"""
+
 
 Terminal 2 - Start Security Agent:
 
-"""
+
 cd agent
 python scripts/starter.py
-"""
+
 
 The security agent will guide you through an interactive setup process where you can:
 
@@ -142,9 +139,9 @@ The security agent will guide you through an interactive setup process where you
 
 Start the complete system:
 
-"""
+
 docker compose up --build
-"""
+
 
 Services will be available at:
 
@@ -158,7 +155,7 @@ Services will be available at:
 
 Agent Configuration (agent/.env):
 
-"""
+
 
 # AI Model API Keys
 
@@ -191,7 +188,7 @@ SECURITY_API_PORT=8001
 
 RAG API Configuration (rag-api/.env):
 
-"""
+
 
 # OpenAI for embeddings
 
@@ -200,13 +197,13 @@ OPENAI_API_KEY=your_openai_api_key
 # API Configuration
 
 PORT=8080
-"""
+
 
 ### Security Agent Configuration
 
 VaultGuard uses agent/starter/security.json for advanced configuration:
 
-"""
+
 {
   "agent_id": "vaultguard_production",
   "model": "claude",
@@ -215,7 +212,7 @@ VaultGuard uses agent/starter/security.json for advanced configuration:
   "research_tools": ["Solana RPC", "Threat Intelligence", "DuckDuckGo"],
   "metric_name": "security"
 }
-"""
+
 
 ## Usage
 
@@ -232,7 +229,7 @@ Once started, VaultGuard provides an interactive interface for:
 
 Analyze a transaction:
 
-"""
+
 curl -X POST <http://localhost:8001/api/v1/analyze> \
   -H "Content-Type: application/json" \
   -d '{
@@ -243,11 +240,10 @@ curl -X POST <http://localhost:8001/api/v1/analyze> \
       "token_mint": "..."
     }
   }'
-"""
 
 Response:
 
-"""
+
 {
   "action": "ALLOW",
   "risk_score": 0.1,
@@ -256,7 +252,7 @@ Response:
   "threat_categories": [],
   "analysis_time_ms": 45
 }
-"""
+
 
 ## API Endpoints
 

@@ -382,7 +382,8 @@ class SecuritySensor:
                 print(f"🔍 Fetching transactions using basic Solana client for {wallet_address[:8]}...")
                 
                 # Get signatures for address
-                pubkey = PublicKey(wallet_address)
+                pubkey = PublicKey.from_string(wallet_address)
+
                 signature_response = await self.basic_solana_client.get_signatures_for_address(pubkey, limit=10)
                 
                 if signature_response.value:

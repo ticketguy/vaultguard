@@ -128,7 +128,7 @@ class EnhancedBackgroundIntelligenceMonitor:
             logger.error(f"❌ EdgeLearningEngine integration failed: {e}")
 
     async def _preload_blacklist_cache(self):
-        """Preload existing blacklisted wallets into EdgeLearningEngine cache"""
+        """Preload existing blacklisted wallets into EdgeLearningEngine cache - ENHANCED"""
         if not self.edge_learning_engine:
             return
         
@@ -136,17 +136,24 @@ class EnhancedBackgroundIntelligenceMonitor:
             preload_count = 0
             
             for address, wallet in self.blacklisted_wallets.items():
+                # 🆕 ENHANCED: More comprehensive intelligence data
                 intelligence = {
                     'threat_patterns': [f'Blacklisted: {wallet.threat_type}'],
-                    'analysis_suggestions': ['comprehensive_analysis', 'behavior_analysis'],
-                    'confidence_boost': 0.8,
+                    'analysis_suggestions': ['comprehensive_analysis', 'behavior_analysis', 'blacklist_check'],
+                    'confidence_boost': wallet.confidence,
                     'risk_indicators': {
                         'blacklisted': True,
                         'threat_type': wallet.threat_type,
                         'confidence': wallet.confidence,
                         'activity_count': wallet.activity_count,
-                        'sources': wallet.sources
-                    }
+                        'sources': wallet.sources,
+                        'last_activity': wallet.last_activity.isoformat() if wallet.last_activity else None,
+                        'added_by': 'background_monitor'
+                    },
+                    # 🆕 ADD: Instant block indicators
+                    'instant_block': True,
+                    'block_reason': f"Address is blacklisted: {wallet.threat_type}",
+                    'user_explanation': f"🚫 BLOCKED: This address is known for {wallet.threat_type.replace('_', ' ')}"
                 }
                 
                 cache_key = f"address_{address}"
@@ -154,12 +161,27 @@ class EnhancedBackgroundIntelligenceMonitor:
                     cache_key,
                     intelligence,
                     source='background_monitor_preload',
-                    ttl_seconds=86400
+                    ttl_seconds=86400  # 24 hours
                 )
                 
                 preload_count += 1
             
             logger.info(f"🧠 Preloaded {preload_count} blacklisted wallets into EdgeLearningEngine cache")
+            
+            # 🆕 ADD: Preload blacklist summary for general access
+            summary_intelligence = {
+                'blacklist_summary': self.get_blacklist_summary(),
+                'total_blacklisted_addresses': len(self.blacklisted_wallets),
+                'cache_type': 'blacklist_summary'
+            }
+            
+            self.edge_learning_engine.intelligence_cache.set(
+                "blacklist_summary",
+                summary_intelligence,
+                source='background_monitor_summary',
+                ttl_seconds=3600  # 1 hour
+            )
+            
         except Exception as e:
             logger.error(f"❌ Cache preload error: {e}")
 
@@ -300,7 +322,7 @@ class EnhancedBackgroundIntelligenceMonitor:
                 await asyncio.sleep(self.config['cache_update_interval'])
 
     async def _apply_cache_update(self, cache_update: Dict):
-        """Apply a cache update to EdgeLearningEngine"""
+        """Apply a cache update to EdgeLearningEngine - ENHANCED for instant blocking"""
         try:
             update_type = cache_update.get('type')
             data = cache_update.get('data', {})
@@ -309,17 +331,26 @@ class EnhancedBackgroundIntelligenceMonitor:
                 address = data.get('address')
                 threat_type = data.get('threat_type', 'unknown')
                 confidence = data.get('confidence', 0.8)
+                source = data.get('source', 'background_monitor')
                 
+                # 🆕 ENHANCED: More comprehensive cache data for instant blocking
                 intelligence = {
                     'threat_patterns': [f'Blacklisted: {threat_type}'],
-                    'analysis_suggestions': ['comprehensive_analysis', 'behavior_analysis'],
+                    'analysis_suggestions': ['comprehensive_analysis', 'behavior_analysis', 'immediate_block'],
                     'confidence_boost': confidence,
                     'risk_indicators': {
                         'blacklisted': True,
                         'threat_type': threat_type,
-                        'discovered_by': 'background_monitor',
-                        'timestamp': datetime.now().isoformat()
-                    }
+                        'discovered_by': source,
+                        'timestamp': datetime.now().isoformat(),
+                        'confidence': confidence
+                    },
+                    # 🆕 ADD: Instant block data for SecurityAgent
+                    'instant_block': True,
+                    'block_reason': f"Address blacklisted for {threat_type}",
+                    'user_explanation': f"🚫 BLOCKED: This address is a known {threat_type.replace('_', ' ')} - transaction blocked for your safety",
+                    'risk_score_override': 1.0,  # Maximum risk
+                    'action_override': 'BLOCK'
                 }
                 
                 cache_key = f"address_{address}"
@@ -330,34 +361,40 @@ class EnhancedBackgroundIntelligenceMonitor:
                     ttl_seconds=86400
                 )
                 
-                logger.info(f"🧠 Updated cache for blacklisted address: {address[:8]}...")
+                logger.info(f"🧠 Updated cache for blacklisted address: {address[:8]}... (instant block enabled)")
                 
             elif update_type == 'threat_intelligence':
                 addresses = data.get('addresses', [])
                 tokens = data.get('tokens', [])
                 threat_type = data.get('threat_type', 'unknown')
+                confidence = data.get('confidence', 0.6)
                 
                 intelligence = {
                     'threat_patterns': [f'Social media threat: {threat_type}'],
                     'analysis_suggestions': ['social_media_analysis', 'comprehensive_analysis'],
-                    'confidence_boost': data.get('confidence', 0.6),
+                    'confidence_boost': confidence,
                     'risk_indicators': {
                         'social_media_threat': True,
                         'threat_type': threat_type,
                         'source': data.get('source', 'unknown'),
-                        'discovered_at': data.get('discovered_at', datetime.now().isoformat())
-                    }
+                        'discovered_at': data.get('discovered_at', datetime.now().isoformat()),
+                        'confidence': confidence
+                    },
+                    # 🆕 ADD: Enhanced user explanations
+                    'user_explanation': f"⚠️ WARNING: This address was mentioned in social media threats related to {threat_type.replace('_', ' ')}"
                 }
                 
+                # Apply to addresses
                 for address in addresses:
                     cache_key = f"address_{address}"
                     self.edge_learning_engine.intelligence_cache.set(
                         cache_key,
                         intelligence,
                         source='background_monitor_threat',
-                        ttl_seconds=43200
+                        ttl_seconds=43200  # 12 hours
                     )
                 
+                # Apply to tokens
                 for token in tokens:
                     cache_key = f"token_{token.lower()}"
                     self.edge_learning_engine.intelligence_cache.set(
@@ -1091,6 +1128,35 @@ class EnhancedBackgroundIntelligenceMonitor:
         except Exception as e:
             logger.error(f"❌ Error adding external threat source: {e}")
             return False
+
+    def get_blacklisted_wallets(self) -> Dict[str, BlacklistedWallet]:
+        """Get all blacklisted wallets for SecurityAgent access"""
+        return self.blacklisted_wallets.copy()
+
+    def is_address_blacklisted(self, address: str) -> Dict[str, Any]:
+        """Check if specific address is blacklisted - for SecurityAgent integration"""
+        if address in self.blacklisted_wallets:
+            wallet = self.blacklisted_wallets[address]
+            return {
+                'is_blacklisted': True,
+                'threat_type': wallet.threat_type,
+                'confidence': wallet.confidence,
+                'sources': wallet.sources,
+                'activity_count': wallet.activity_count,
+                'last_activity': wallet.last_activity.isoformat() if wallet.last_activity else None
+            }
+        return {'is_blacklisted': False}
+
+    def get_blacklist_summary(self) -> Dict[str, Any]:
+        """Get blacklist summary for SecurityAgent cache integration"""
+        return {
+            'total_blacklisted': len(self.blacklisted_wallets),
+            'threat_types': list(set(w.threat_type for w in self.blacklisted_wallets.values())),
+            'high_confidence_count': len([w for w in self.blacklisted_wallets.values() if w.confidence >= 0.8]),
+            'recent_additions': len([w for w in self.blacklisted_wallets.values() 
+                                if w.last_activity and w.last_activity > datetime.now() - timedelta(hours=24)]),
+            'last_updated': datetime.now().isoformat()
+        }
 
     async def sync_with_community_database(self, community_db_api_url: str) -> Dict[str, Any]:
         """Sync with external community database API"""

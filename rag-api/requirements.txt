@@ -1,0 +1,55 @@
+# VaultGuard Core Dependencies
+
+
+# HTTP and Async
+aiohttp
+httpx
+requests
+
+# AI and ML
+anthropic
+openai
+langchain
+langchain-community
+langchain-openai
+ollama
+
+# Vector Database
+faiss-cpu
+
+# Web Framework
+fastapi
+uvicorn
+starlette
+
+# Data Processing
+pydantic
+pydantic-settings
+polars
+numpy
+
+# Database
+peewee
+sqlalchemy
+
+# Utilities
+python-dotenv
+pyyaml
+loguru
+result
+retry
+
+# Social Media
+tweepy
+
+# Search
+duckduckgo-search
+
+# Blockchain (Solana only)
+web3
+
+# Container Management
+docker
+
+# Development
+pip

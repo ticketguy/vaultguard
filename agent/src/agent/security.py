@@ -366,6 +366,29 @@ class SecurityAgent:
             del self.fallback_cache[key]
         logger.debug(f"🧹 Cleaned {len(expired_keys)} expired cache entries")
 
+    def _get_fallback_analysis_suggestions(self, target_data: Dict) -> List[str]:
+        """Generate fallback analysis suggestions when cache miss occurs"""
+        suggestions = ['comprehensive_analysis']
+        
+        # Add suggestions based on transaction data
+        if target_data.get('program_id'):
+            suggestions.append('contract_analysis')
+        if target_data.get('token_address') or target_data.get('token_name'):
+            suggestions.append('token_analysis')
+        if target_data.get('from_address'):
+            suggestions.append('behavior_analysis')
+        if target_data.get('value', 0) > 0:
+            suggestions.append('value_analysis')
+        
+        # Add suggestions based on transaction type
+        tx_type = target_data.get('transaction_type', '').lower()
+        if 'swap' in tx_type or 'trade' in tx_type:
+            suggestions.append('mev_analysis')
+        if 'nft' in tx_type:
+            suggestions.append('nft_analysis')
+        
+        return list(set(suggestions))  # Remove duplicates
+
     def set_edge_learning_engine(self, edge_learning_engine):
         """Inject EdgeLearningEngine for advanced background intelligence"""
         self.edge_learning_engine = edge_learning_engine
@@ -526,47 +549,100 @@ class SecurityAgent:
 
     async def _generate_module_orchestration_code_cached(self, target_data: Dict, cached_intelligence: Dict) -> str:
         """
-        AI generates code using cached intelligence.
+        AI generates code with ENHANCED prompts including blacklist checking, address analysis, and smart contract reading
         """
         analysis_suggestions = cached_intelligence.get('analysis_suggestions', ['comprehensive_analysis'])
         threat_patterns = cached_intelligence.get('threat_patterns', [])
         available_modules = self._get_available_modules()
         
+        # 🆕 ENHANCED: Extract addresses for comprehensive analysis
+        addresses_to_check = []
+        if target_data.get('from_address'):
+            addresses_to_check.append(target_data['from_address'])
+        if target_data.get('to_address'):
+            addresses_to_check.append(target_data['to_address'])
+        if target_data.get('program_id'):
+            addresses_to_check.append(target_data['program_id'])
+        if target_data.get('token_address'):
+            addresses_to_check.append(target_data['token_address'])
+        
         code_generation_prompt = f"""
-Generate Python code that orchestrates existing security analysis modules for this Solana transaction.
+    Generate Python code for comprehensive Solana transaction security analysis.
 
-Target Data:
-{json.dumps(target_data, indent=2)}
+    Target Data:
+    {json.dumps(target_data, indent=2)}
 
-Cached Intelligence:
-- Analysis Needed: {', '.join(analysis_suggestions)}
-- Available Security Modules: {', '.join(available_modules)}
-- Known Threat Patterns: {threat_patterns[:2] if threat_patterns else ['No cached patterns']}
-- Cache Age: {cached_intelligence.get('cache_age_seconds', 0)} seconds
+    Addresses to Analyze: {addresses_to_check}
+    Cached Intelligence: {', '.join(analysis_suggestions)}
+    Available Security Modules: {', '.join(available_modules)}
+    Known Threat Patterns: {threat_patterns[:2] if threat_patterns else ['No cached patterns']}
 
-Generate a complete Python function called 'analyze_security_threats' that:
+    Generate a complete Python function called 'analyze_security_threats' that performs these steps in order:
 
-1. Uses the available security modules based on transaction type:
-   - MEVDetector for transaction analysis (mev_detector.analyze_mev_risk)
-   - EnhancedContractAnalyzer for contract analysis (contract_analyzer.analyze_contract_for_drain_risk)
-   - BehaviorAnalyzer for wallet analysis (behavior_analyzer.analyze_wallet_behavior)
-   - NFTScamDetector for NFT analysis (nft_scam_detector.analyze_nft_scam_risk)
-   - AdaptiveDustDetector for dust analysis (dust_detector.analyze_transaction)
+    STEP 1 - PRIORITY BLACKLIST CHECK:
+    - Check ALL addresses ({addresses_to_check}) against blacklisted wallets
+    - Use: sensor.background_monitor.blacklisted_wallets if available
+    - If ANY address is blacklisted, return immediately with risk_score=1.0 and threats_found=['blacklisted_address']
 
-2. Prioritizes analysis based on cached threat patterns
-3. Combines results from multiple modules into comprehensive analysis
-4. Returns structured result with risk_score, threats_found, evidence, and explanations
+    STEP 2 - ADDRESS TYPE ANALYSIS:
+    - For each address, determine the type:
+    * Token mint address (check if it's a token contract)
+    * Program/Smart contract address (check if it's executable)
+    * Wallet address (regular user wallet)
+    * System account (Solana system programs)
+    - Generate explanations like: "to_address is a token contract", "program_id is a DeFi protocol"
 
-Code Requirements:
-- Use 'await module.method(target_data)' for each module call
-- Handle module unavailability gracefully (check if module exists)
-- Combine risk scores using weighted average
-- Include evidence from each module
-- Return risk scores from 0.0 to 1.0
-- Include simple explanations for each threat found
+    STEP 3 - SMART CONTRACT READING (if program_id exists):
+    - Read contract bytecode and analyze functions
+    - Identify contract type: token, NFT, DeFi, DApp, or unknown
+    - Check for suspicious patterns: honeypot mechanics, drain functions, admin controls
+    - Look for: unlimited mint functions, pause mechanisms, blacklist functions, tax systems
+    - Generate explanation: "This contract can pause token transfers" or "This token has 10% sell tax"
 
-ONLY return the Python function code, no explanations or markdown.
-"""
+    STEP 4 - TOKEN CONTRACT ANALYSIS (if token_address exists):
+    - Read token contract details: supply, decimals, freeze authority
+    - Check for scam indicators: fake token names, honeypot mechanics
+    - Analyze transfer restrictions and tax mechanisms
+    - Generate explanation: "This token charges 5% tax on sells" or "Token transfers can be frozen"
+
+    STEP 5 - USER-FRIENDLY TRANSACTION EXPLANATION:
+    - Create simple English summary based on address analysis
+    - Examples:
+    * "You're sending SOL to Jupiter DEX to swap for USDC"
+    * "You're connecting to a token contract with suspicious tax mechanics" 
+    * "You're interacting with an unknown smart contract"
+    * "This is a known scammer address - BLOCKED"
+
+    STEP 6 - EXISTING MODULE ANALYSIS:
+    - Use available security modules: {', '.join(available_modules)}
+    - MEVDetector: mev_detector.analyze_mev_risk(target_data)
+    - EnhancedContractAnalyzer: contract_analyzer.analyze_contract_for_drain_risk(target_data)
+    - BehaviorAnalyzer: behavior_analyzer.analyze_wallet_behavior(target_data)
+    - NFTScamDetector: nft_scam_detector.analyze_nft_scam_risk(target_data)
+    - AdaptiveDustDetector: dust_detector.analyze_transaction(target_data)
+
+    RETURN STRUCTURE:
+    {{
+        'risk_score': float (0.0-1.0),
+        'threats_found': list of threat types,
+        'evidence': list of evidence descriptions,
+        'address_analysis': dict with address types and explanations,
+        'contract_analysis': dict with smart contract details,
+        'user_explanation': string with simple English explanation,
+        'module_results': dict with results from existing modules,
+        'modules_used': list of modules that were called
+    }}
+
+    Code Requirements:
+    - Use 'await module.method(target_data)' for module calls
+    - Handle module unavailability gracefully (check if hasattr(sensor, 'module_name'))
+    - Always check blacklist FIRST before other analysis
+    - Generate clear explanations for users
+    - Include evidence for all findings
+    - Return risk scores from 0.0 to 1.0
+
+    ONLY return the Python function code, no explanations or markdown.
+    """
         try:
             instruction_message = Message(role="user", content=code_generation_prompt)
             ai_response = await asyncio.wait_for(
@@ -847,11 +923,9 @@ print(json.dumps(result, default=str))
 
     async def _safe_execute_code(self, execution_code: str):
         """Safely execute code in container with sensor context"""
-        execution_context = {'sensor': self.sensor}
         return self.container_manager.run_code_in_con(
             execution_code, 
             "ai_security_analysis",
-            context=execution_context
         )
 
     def _should_quarantine(self, analysis_result: Dict) -> bool:

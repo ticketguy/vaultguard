@@ -929,7 +929,7 @@ async def legacy_engine_status():
 def starter_prompt():
     """Enhanced interactive configuration for security system"""
     questions = [
-        inquirer.Text("agent_name", message="Security Agent Name:", default="enhanced_security"),
+        inquirer.Text("agent_name", message="Security Agent Name:", default="VaultGuard"),
         inquirer.List(
             name="model",
             message="Which AI model do you want to use?",

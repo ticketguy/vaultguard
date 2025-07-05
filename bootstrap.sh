@@ -1,4 +1,4 @@
-
+#!/bin/bash
 set -e
 
 # VaultGuard Bootstrap Script - Web3 Security Agent Setup
@@ -7,14 +7,49 @@ echo "🛡️ VaultGuard - Web3 Security Agent Framework"
 echo "============================================="
 
 check_python_version() {
-	required="3.12"
-	current=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "0.0")
-	if [[ $(echo "$current < $required" | bc -l 2>/dev/null || echo "1") -eq 1 ]]; then
-		echo "❌ Error: Python $required+ required (found $current)" >&2
+	required_major=3
+	required_minor=12
+	
+	# Try different Python command variations (Windows/Linux compatible)
+	python_commands=("python" "python3" "py" "python.exe")
+	python_cmd=""
+	
+	for cmd in "${python_commands[@]}"; do
+		if command -v "$cmd" >/dev/null 2>&1; then
+			# Test if this Python command actually works
+			if version_test=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null); then
+				python_cmd="$cmd"
+				version_output="$version_test"
+				break
+			fi
+		fi
+	done
+	
+	if [ -z "$python_cmd" ]; then
+		echo "❌ Error: No working Python installation found" >&2
+		echo "Please install Python 3.12+ and ensure it's in your PATH"
+		echo "Tried commands: ${python_commands[*]}"
+		exit 1
+	fi
+	
+	# Extract version numbers
+	current_major=$(echo $version_output | cut -d. -f1)
+	current_minor=$(echo $version_output | cut -d. -f2)
+	
+	# Debug output for troubleshooting
+	echo "🐍 Found Python command: $python_cmd"
+	echo "🐍 Detected version: $version_output"
+	
+	# Check if version meets minimum requirement
+	if [ "$current_major" -gt "$required_major" ] || 
+	   ([ "$current_major" -eq "$required_major" ] && [ "$current_minor" -ge "$required_minor" ]); then
+		echo "✅ Python $version_output detected (3.12+ required)"
+		export PYTHON_CMD=$python_cmd
+	else
+		echo "❌ Error: Python 3.12+ required (found $version_output)" >&2
 		echo "Please install Python 3.12+ and try again"
 		exit 1
 	fi
-	echo "✅ Python $current detected"
 }
 
 check_dependencies() {
@@ -36,20 +71,14 @@ check_dependencies() {
 	else
 		echo "⚠️ Docker Compose not found - required for containerized deployment"
 	fi
-	
-	# Check bc for version comparison
-	if ! command -v bc >/dev/null 2>&1; then
-		echo "⚠️ Installing bc for version checks..."
-		sudo apt-get update && sudo apt-get install -y bc 2>/dev/null || echo "Please install 'bc' manually"
-	fi
 }
 
 setup_agent() {
 	echo "🐍 Setting up Security Agent environment..."
 	
-	# Create virtual environment
-	python3 -m venv agent-venv
-	source agent-venv/bin/activate
+	# Create virtual environment using detected Python
+	$PYTHON_CMD -m venv venv
+	source venv/scripts/activate
 	
 	# Install agent dependencies
 	cd agent
@@ -72,6 +101,9 @@ setup_agent() {
 setup_rag() {
 	echo "🧠 Setting up RAG API environment..."
 	
+	# Activate the same virtual environment
+	source venv/scripts/activate
+	
 	cd rag-api
 	
 	# Install RAG dependencies
@@ -90,6 +122,7 @@ setup_rag() {
 	mkdir -p pkl db
 	
 	cd ..
+	deactivate
 	echo "✅ RAG API environment ready"
 }
 
@@ -124,6 +157,7 @@ display_next_steps() {
 	echo "2. Start VaultGuard:"
 	echo ""
 	echo "   🚀 Method 1 - Individual Services:"
+	echo "      source agent-venv/bin/activate"
 	echo "      Terminal 1: cd rag-api && python scripts/api.py"
 	echo "      Terminal 2: cd agent && python scripts/starter.py"
 	echo ""
