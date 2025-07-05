@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  vaultguard-community-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://community:community@community-db:5432/community_db
+      - REDIS_URL=redis://community-redis:6379
+      - PORT=8082
+      - NODE_ENV=production
+    depends_on:
+      - community-db
+      - community-redis
+    ports:
+      - "8082:8082"
+    networks:
+      - vaultguard-community-network
+
+  community-db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=community_db
+      - POSTGRES_USER=community
+      - POSTGRES_PASSWORD=community
+    volumes:
+      - community_db_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "5434:5432"
+    networks:
+      - vaultguard-community-network
+
+  community-redis:
+    image: redis:7-alpine
+    volumes:
+      - community_redis_data:/data
+    ports:
+      - "6381:6379"
+    networks:
+      - vaultguard-community-network
+
+volumes:
+  community_db_data:
+  community_redis_data:
+
+networks:
+  vaultguard-community-network:
+    driver: bridge

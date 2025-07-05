@@ -19,9 +19,9 @@ node_modules
 DS_Store*
 DS_Store
 
+
 agent-venv
-rest-api-venv
-rag-api-venv
+
 
 code/
 pkl/

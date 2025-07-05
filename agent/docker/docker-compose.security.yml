@@ -1,21 +1,86 @@
 version: '3.8'
 
 services:
-  security-agent:
+  vaultguard-security-agent:
     build:
       context: ..
       dockerfile: docker/Dockerfile.security
     environment:
       - SECURITY_DB_URL=postgresql://security:security@security-db:5432/security_db
       - REDIS_URL=redis://security-redis:6379
+      - COMMUNITY_DB_API_URL=http://community-db-api:8082
+      - JUPITER_API_URL=https://quote-api.jup.ag/v6
+      - BACKGROUND_LEARNING=true
+      - CACHE_INTELLIGENCE=true
+      - PYTHONPATH=/app
     depends_on:
       - security-db
       - security-redis
+      - community-db-api
     volumes:
       - ../src:/app/src
       - ../config:/app/config
+      - intelligence_cache:/app/cache
     ports:
       - "8001:8001"
+    networks:
+      - vaultguard-network
+
+  background-learning-engine:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.learning
+    environment:
+      - REDIS_URL=redis://security-redis:6379
+      - COMMUNITY_DB_API_URL=http://community-db-api:8082
+      - RAG_URL=http://rag-api:8080
+      - JUPITER_API_URL=https://quote-api.jup.ag/v6
+      - DEFI_LLAMA_API_URL=https://api.llama.fi
+      - PYTHONPATH=/app
+    depends_on:
+      - security-redis
+      - community-db-api
+      - rag-api
+    volumes:
+      - ../src:/app/src
+      - intelligence_cache:/app/cache
+    networks:
+      - vaultguard-network
+
+  external-data-connector:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.external
+    environment:
+      - JUPITER_API_URL=https://quote-api.jup.ag/v6
+      - DEFI_LLAMA_API_URL=https://api.llama.fi
+      - COMMUNITY_DB_API_URL=http://community-db-api:8082
+      - REDIS_URL=redis://security-redis:6379
+      - PYTHONPATH=/app
+    depends_on:
+      - security-redis
+      - community-db-api
+    volumes:
+      - intelligence_cache:/app/cache
+    networks:
+      - vaultguard-network
+
+  community-db-api:
+    build:
+      context: ../community-db-api
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://community:community@community-db:5432/community_db
+      - REDIS_URL=redis://community-redis:6379
+      - PORT=8082
+      - NODE_ENV=production
+    depends_on:
+      - community-db
+      - community-redis
+    ports:
+      - "8082:8082"
+    networks:
+      - vaultguard-network
 
   security-db:
     image: postgres:15
@@ -27,6 +92,21 @@ services:
       - security_db_data:/var/lib/postgresql/data
     ports:
       - "5433:5432"
+    networks:
+      - vaultguard-network
+
+  community-db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=community_db
+      - POSTGRES_USER=community
+      - POSTGRES_PASSWORD=community
+    volumes:
+      - community_db_data:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+    networks:
+      - vaultguard-network
 
   security-redis:
     image: redis:7-alpine
@@ -34,7 +114,40 @@ services:
       - security_redis_data:/data
     ports:
       - "6380:6379"
+    networks:
+      - vaultguard-network
+
+  community-redis:
+    image: redis:7-alpine
+    volumes:
+      - community_redis_data:/data
+    ports:
+      - "6381:6379"
+    networks:
+      - vaultguard-network
+
+  rag-api:
+    build:
+      context: ../../rag-api
+      dockerfile: Dockerfile
+    environment:
+      - PORT=8080
+      - BACKGROUND_PROCESSING=true
+      - REDIS_URL=redis://security-redis:6379
+    depends_on:
+      - security-redis
+    ports:
+      - "8080:8080"
+    networks:
+      - vaultguard-network
 
 volumes:
   security_db_data:
+  community_db_data:
   security_redis_data:
+  community_redis_data:
+  intelligence_cache:
+
+networks:
+  vaultguard-network:
+    driver: bridge
