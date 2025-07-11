@@ -87,6 +87,12 @@ def get_available_models():
     if not available:
         raise Exception("No AI API keys configured! Please set OPENROUTER_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY")
     
+    if os.getenv("GOOGLE_API_KEY"):
+        available.append("Gemini (direct)")
+    
+    if not available:
+        raise Exception("No AI API keys configured!")
+    
     return available
 
 def get_model_backend(model_choice: str) -> str:
@@ -97,6 +103,7 @@ def get_model_backend(model_choice: str) -> str:
         "Gemini (openrouter)": "gemini",
         "QWQ (openrouter)": "qwq",
         "Claude": "claude",
+        "Gemini (direct)": "gemini_direct", 
     }
     backend = model_naming.get(model_choice)
     if not backend:
@@ -149,6 +156,12 @@ def setup_ai_genner(model_choice: str):
         
     elif backend_name == "openai" and model_choice == "OpenAI":
         return get_genner(backend=backend_name, stream_fn=None)
+    
+    elif backend_name == "gemini_direct":
+        google_api_key = os.getenv("GOOGLE_API_KEY")
+        if not google_api_key:
+            raise Exception("GOOGLE_API_KEY required for direct Gemini access")
+        return get_genner(backend="gemini_direct", stream_fn=None)
         
     else:
         raise Exception(f"Unsupported model: {model_choice}")

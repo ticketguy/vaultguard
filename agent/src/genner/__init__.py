@@ -1,6 +1,6 @@
 
 from typing import Callable
-import os  # ADD THIS
+import os  
 
 from anthropic import Anthropic
 from openai import OpenAI
@@ -12,7 +12,7 @@ from src.config import (
     OAIConfig,
     OllamaConfig,
     OpenRouterConfig,
-    GoogleGeminiConfig,  # ADD THIS
+    GoogleGeminiConfig,  
 )
 from src.genner.Claude import ClaudeGenner
 from src.genner.OAI import OAIGenner
@@ -47,7 +47,7 @@ available_backends = [
     "gemini",
     "claude",
     "qwq",
-    "gemini_direct"  # ADD THIS
+    "gemini_direct"  
 ]
 
 
@@ -134,9 +134,8 @@ def get_genner(
 
         return DeepseekGenner(or_client, deepseek_config, stream_fn)
     elif backend == "gemini":
-        # ✅ FIXED - Use actual Gemini model name
-        gemini_config.name = "google/gemini-pro"
-        gemini_config.model = "google/gemini-pro"
+        gemini_config.name = "google/gemini-2.5-pro-preview-06-05"
+        gemini_config.model = "google/gemini-2.5-pro-preview-06-05"
 
         if not or_client:
             raise Exception(

@@ -723,7 +723,24 @@ class SecurityAgent:
             print(traceback.format_exc())
             logger.error(f"AI code generation error: {e}")
             return self._generate_fallback_module_orchestration_code(target_data, analysis_suggestions)
+    
+    def _extract_python_code(self, response: str) -> str:
+        """Extract Python code from AI response"""
+        import re
         
+        # Try to find Python code blocks
+        python_matches = re.findall(r"```python\n(.*?)\n```", response, re.DOTALL)
+        if python_matches:
+            return python_matches[0].strip()
+        
+        # Try to find generic code blocks
+        code_matches = re.findall(r"```\n(.*?)\n```", response, re.DOTALL)
+        if code_matches:
+            return code_matches[0].strip()
+        
+        # If no code blocks found, return the response as-is
+        return response.strip()
+
     def _get_available_modules(self) -> List[str]:
         """Get list of available analysis modules from connected SecuritySensor"""
         modules = []
