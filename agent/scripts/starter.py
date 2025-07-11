@@ -213,12 +213,26 @@ class SecurityResponse(BaseModel):
 # ========== CONFIGURATION LOADING ==========
 def load_config():
     """Load configuration from security.json"""
-    try:
-        with open("agent/starter/security.json", "r") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to load security.json: {e}")
-        return {}
+    import os
+    
+    # Try multiple possible paths
+    possible_paths = [
+        "starter/security.json",           # When running from agent/ directory
+        "agent/starter/security.json",     # When running from root directory
+        "./starter/security.json",         # Alternative relative path
+    ]
+    
+    for path in possible_paths:
+        try:
+            if os.path.exists(path):
+                with open(path, "r") as f:
+                    logger.info(f"✅ Loaded config from: {path}")
+                    return json.load(f)
+        except Exception as e:
+            continue
+    
+    logger.warning(f"⚠️ Failed to load security.json from any location")
+    return {}
 
 # ========== ENHANCED SECURITY SYSTEM INITIALIZATION ==========
 async def initialize_enhanced_security_system(fe_data: dict):
@@ -320,6 +334,9 @@ async def initialize_enhanced_security_system(fe_data: dict):
         sensor.set_security_agent(security_agent)
         logger.info("🔗 SecuritySensor ↔ SecurityAgent connected")
     
+    security_agent.sensor = sensor
+    logger.info("🔗 SecuritySensor connected to SecurityAgent for module access")
+
     # Start Background Monitor
     if BACKGROUND_MONITOR_AVAILABLE and fe_data.get("enable_background_monitor", False):
         try:
@@ -956,7 +973,7 @@ def starter_prompt():
     logger.info(f"🪐 Jupiter Integration: {'Enabled' if answers['enable_jupiter_integration'] else 'Disabled'}")
     
     if answers["start_api"]:
-        api_port = int(os.getenv("SECURITY_API_PORT", "9009"))
+        api_port = int(os.getenv("SECURITY_API_PORT", "8001"))
         logger.info(f"🚀 Starting enhanced security system on port {api_port}")
         logger.info("⚡ Instant transaction analysis with cached intelligence!")
         

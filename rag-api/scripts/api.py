@@ -410,13 +410,8 @@ async def store_execution_result_batch_v4(params: List[SaveResultParamsV4]):
 
 
 if __name__ == "__main__":
-	port = int(os.environ.get("PORT", "32771"))
+	port = int(os.environ.get("PORT", "8080"))
 	host = os.environ.get("HOST", "0.0.0.0")
 
 	uvicorn.run(app, host=host, port=port)
 
-if __name__ == "__main__":
-	port = int(os.environ.get("PORT", "32771"))
-	host = os.environ.get("HOST", "0.0.0.0")
-
-	uvicorn.run(app, host=host, port=port)

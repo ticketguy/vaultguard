@@ -70,7 +70,7 @@ export interface SecurityConfig {
     constructor(walletProviderId: string, config: SecurityConfig = {}) {
       this.walletProviderId = walletProviderId;
       this.config = config;
-      this.agentUrl = config.agent_url || 'http://localhost:9009';
+      this.agentUrl = config.agent_url || 'http://localhost:8001';
       
       this.callbacks = {
         on_threat_detected: null,

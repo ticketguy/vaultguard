@@ -168,6 +168,52 @@ class SecuritySensor:
         self.security_agent = security_agent
         print("🔗 SecuritySensor connected to SecurityAgent")
 
+    # ========== UTILITY METHODS FOR DATA SANITIZATION ==========
+
+    def _sanitize_transaction_data(self, transaction_data: Dict) -> Dict:
+        """Convert Signature objects, datetime objects, and other non-serializable types to strings"""
+        def make_serializable(obj):
+            """Recursively make object JSON serializable"""
+            if isinstance(obj, dict):
+                return {key: make_serializable(value) for key, value in obj.items()}
+            elif isinstance(obj, list):
+                return [make_serializable(item) for item in obj]
+            elif isinstance(obj, datetime):
+                return obj.isoformat()
+            elif hasattr(obj, '__str__') and hasattr(obj, '__class__'):
+                # Check if it's a Signature object or similar unhashable type
+                if 'Signature' in str(type(obj)) or 'TransactionConfirmationStatus' in str(type(obj)) or not self._is_hashable(obj):
+                    return str(obj)
+                else:
+                    return obj
+            else:
+                return obj
+        
+        sanitized = make_serializable(transaction_data)
+        
+        # Test that it's JSON serializable
+        try:
+            json.dumps(sanitized)
+            return sanitized
+        except (TypeError, ValueError) as e:
+            print(f"⚠️ Warning: Transaction data still not JSON serializable after sanitization: {e}")
+            # Fallback: convert everything to strings except basic types
+            safe_data = {}
+            for key, value in transaction_data.items():
+                if isinstance(value, (str, int, float, bool, type(None))):
+                    safe_data[key] = value
+                else:
+                    safe_data[key] = str(value)
+            return safe_data
+
+    def _is_hashable(self, obj) -> bool:
+        """Check if an object is hashable"""
+        try:
+            hash(obj)
+            return True
+        except TypeError:
+            return False
+
     # ========== REAL-TIME TRANSACTION INTERCEPTION ==========
 
     async def intercept_outgoing_transaction(self, transaction_data: Dict, user_language: str = "english") -> Dict:
@@ -179,6 +225,9 @@ class SecuritySensor:
             return self._fallback_analysis(transaction_data, "No AI agent connected")
         
         try:
+            # FIX: Sanitize transaction data FIRST
+            transaction_data = self._sanitize_transaction_data(transaction_data)
+            
             # Use SecurityAgent's AI code generation for analysis
             analysis_result = await self.security_agent.analyze_with_ai_code_generation(
                 transaction_data, user_language
@@ -202,6 +251,9 @@ class SecuritySensor:
             return self._fallback_analysis(transaction_data, "No AI agent connected")
         
         try:
+            # FIX: Sanitize transaction data FIRST
+            transaction_data = self._sanitize_transaction_data(transaction_data)
+            
             print(f"📥 Processing incoming transaction: {transaction_data.get('hash', 'unknown')}")
             
             # Mark as incoming transaction
@@ -264,6 +316,8 @@ class SecuritySensor:
         }
         
         try:
+            # Sanitize data before analysis
+            dapp_data = self._sanitize_transaction_data(dapp_data)
             analysis_result = await self.security_agent.analyze_with_ai_code_generation(dapp_data)
             
             # Convert to simple status
@@ -333,6 +387,9 @@ class SecuritySensor:
                 recent_transactions = await self._fetch_recent_transactions(wallet_address)
                 
                 for tx in recent_transactions:
+                    # FIX: Convert Signature objects to strings BEFORE processing
+                    tx = self._sanitize_transaction_data(tx)
+                    
                     tx_hash = tx.get('hash', tx.get('signature', ''))
                     
                     # Skip if already processed

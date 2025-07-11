@@ -36,7 +36,7 @@ class WalletSecuritySDK:
     def __init__(self, wallet_provider_id: str, config: Dict = None):
         self.wallet_provider_id = wallet_provider_id
         self.config = config or {}
-        self.agent_url = self.config.get('agent_url', 'http://localhost:9009')
+        self.agent_url = self.config.get('agent_url', 'http://localhost:8001')
         
         # HTTP session for API calls
         self.session = None

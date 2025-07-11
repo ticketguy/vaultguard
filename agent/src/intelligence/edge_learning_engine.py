@@ -1026,13 +1026,23 @@ class EdgeLearningEngine:
     # ========== INTEGRATION METHODS FOR OTHER COMPONENTS ==========
     
     async def integrate_with_security_agent(self, security_agent) -> None:
-        """Integrate with SecurityAgent for seamless background learning"""
+        """
+        Integrate with SecurityAgent for seamless background learning
+        
+        This integration allows EdgeLearningEngine to work with SecurityAgent without
+        overriding the SecurityAgent's _get_cached_intelligence method, which was
+        causing the "unhashable type: 'dict'" error.
+        """
+        # Set the intelligence cache reference so SecurityAgent can access it
         security_agent.intelligence_cache = self.intelligence_cache
-        security_agent._get_cached_intelligence = self.get_cached_intelligence
+        
+        # Set up background learning integration
         security_agent._trigger_background_learning = self._trigger_background_learning_from_agent
         security_agent.learn_from_user_decision = self.learn_from_user_decision
         
         logger.info("🔗 EdgeLearningEngine integrated with SecurityAgent")
+        logger.info("✅ SecurityAgent will use its own _get_cached_intelligence method")
+        logger.info("✅ EdgeLearningEngine provides background learning and cache storage")
     
     def _trigger_background_learning_from_agent(self, target_data: Dict, analysis_result: Dict) -> None:
         """Trigger background learning from SecurityAgent analysis results"""

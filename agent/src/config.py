@@ -122,3 +122,11 @@ class OpenRouterConfig(BaseLLMConfig):
 	model: str = "openai/o3-mini"
 	max_tokens = 8192
 	temperature: float | None = None
+
+@dataclass
+class GoogleGeminiConfig(BaseLLMConfig):
+    """Configuration for Google Gemini direct API"""
+    name: str = "gemini-1.5-pro"
+    model: str = "gemini-1.5-pro"
+    max_tokens: int = 8192
+    temperature: float = 0.7
