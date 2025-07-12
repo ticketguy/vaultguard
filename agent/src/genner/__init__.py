@@ -111,8 +111,8 @@ def get_genner(
 
         return ClaudeGenner(anthropic_client, claude_config, stream_fn)
     elif backend == "openai":
-        openai_config.name = "openai/gpt-4o-mini"  # ✅ FIXED
-        openai_config.model = "openai/gpt-4o-mini"  # ✅ FIXED
+        openai_config.name = "openai/gpt-4o-mini"  
+        openai_config.model = "openai/gpt-4o-mini"   
 
         if not or_client:
             return OAIGenner(

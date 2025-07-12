@@ -22,7 +22,7 @@ class OAIConfig(BaseLLMConfig):
 
 	name: str | None = None
 	model: str | None = None
-	max_tokens: int = 8192
+	max_tokens: int = 65536  
 	temperature: float = 0.0
 	thinking_delimiter: str = ""
 
@@ -101,7 +101,7 @@ class ClaudeConfig(BaseLLMConfig):
 
 	name: str = "Claude"
 	model: str = "claude-3-5-sonnet-latest"
-	max_tokens = 8192
+	max_tokens = 65536  
 
 
 @dataclass
@@ -120,7 +120,7 @@ class OpenRouterConfig(BaseLLMConfig):
 
 	name: str = "openai/o3-mini"
 	model: str = "openai/o3-mini"
-	max_tokens = 8192
+	max_tokens = 65536  
 	temperature: float | None = None
 
 @dataclass
@@ -128,5 +128,5 @@ class GoogleGeminiConfig(BaseLLMConfig):
     """Configuration for Google Gemini direct API"""
     name: str = "gemini-1.5-pro"
     model: str = "gemini-1.5-pro"
-    max_tokens: int = 8192
+    max_tokens: int = 65536  
     temperature: float = 0.7

@@ -1,3 +1,4 @@
+import os
 import re
 import json
 import asyncio
@@ -191,7 +192,7 @@ class SecurityAgent:
         
         self.ai_code_config = {
             'max_execution_time': 15,
-            'max_code_generation_time': 10,
+            'max_code_generation_time': 130,
             'supported_languages': ['english', 'spanish', 'french', 'japanese', 'portuguese'],
             'default_language': 'english',
             'enable_cached_intelligence': True,
@@ -596,7 +597,7 @@ class SecurityAgent:
 
     async def _generate_module_orchestration_code_cached(self, target_data: Dict, cached_intelligence: Dict) -> str:
         """
-        AI generates code with ENHANCED prompts including blacklist checking, address analysis, and smart contract reading
+        AI generates code with ENHANCED prompts that use REAL sensor modules
         """
         print(f"🚨 DEBUG: _generate_module_orchestration_code_cached called")
         print(f"🚨 DEBUG: target_data type: {type(target_data)}")
@@ -606,7 +607,7 @@ class SecurityAgent:
         threat_patterns = cached_intelligence.get('threat_patterns', [])
         available_modules = self._get_available_modules()
         
-        # 🆕 ENHANCED: Extract addresses for comprehensive analysis
+        # Extract addresses for comprehensive analysis
         addresses_to_check = []
         if target_data.get('from_address'):
             addresses_to_check.append(target_data['from_address'])
@@ -619,85 +620,94 @@ class SecurityAgent:
         
         print(f"🚨 DEBUG: addresses_to_check: {addresses_to_check}")
         print(f"🚨 DEBUG: available_modules: {available_modules}")
-        
+
         code_generation_prompt = f"""
-    Generate Python code that orchestrates existing security analysis modules for this Solana transaction.
+    Generate Python code that uses the REAL sensor object passed to the function.
 
-    Target Data will be passed as a dictionary parameter to the function.
-    Transaction Hash: {target_data.get('hash', 'unknown')}
-    Transaction Type: {target_data.get('analysis_type', 'unknown')}
-    Direction: {target_data.get('direction', 'unknown')}
+    CRITICAL: The function will receive these parameters:
+    - target_data: dict containing transaction information  
+    - sensor: REAL SecuritySensor object with actual modules
 
-    Addresses to Analyze: {addresses_to_check}
-    Cached Intelligence: {', '.join(analysis_suggestions)}
-    Available Security Modules: {', '.join(available_modules)}
-    Known Threat Patterns: {threat_patterns[:2] if threat_patterns else ['No cached patterns']}
+    DO NOT create any Mock classes. Use the real sensor object that contains:
+    - sensor.background_monitor.blacklisted_wallets (if available)
+    - sensor.mev_detector (if available) 
+    - sensor.contract_analyzer (if available)
+    - sensor.dust_detector (if available)
+    - sensor.nft_scam_detector (if available)
+    - sensor.behavior_analyzer (if available)
 
-    Generate a complete Python function called 'analyze_security_threats' that performs these steps in order:
+    Transaction Details:
+    - Transaction Hash: {target_data.get('hash', 'unknown')}
+    - Direction: {target_data.get('direction', 'unknown')}
+    - Addresses to Analyze: {addresses_to_check}
+    - Available Modules: {', '.join(available_modules)}
 
-    STEP 1 - PRIORITY BLACKLIST CHECK:
-    - Check ALL addresses ({addresses_to_check}) against blacklisted wallets
-    - Use: sensor.background_monitor.blacklisted_wallets if available
-    - If ANY address is blacklisted, return immediately with risk_score=1.0 and threats_found=['blacklisted_address']
+    Generate ONLY the function definition:
 
-    STEP 2 - ADDRESS TYPE ANALYSIS:
-    - For each address, determine the type:
-    * Token mint address (check if it's a token contract)
-    * Program/Smart contract address (check if it's executable)
-    * Wallet address (regular user wallet)
-    * System account (Solana system programs)
-    - Generate explanations like: "to_address is a token contract", "program_id is a DeFi protocol"
+    async def analyze_security_threats(target_data: dict, sensor: object) -> dict:
 
-    STEP 3 - SMART CONTRACT READING (if program_id exists):
-    - Read contract bytecode and analyze functions
-    - Identify contract type: token, NFT, DeFi, DApp, or unknown
-    - Check for suspicious patterns: honeypot mechanics, drain functions, admin controls
-    - Look for: unlimited mint functions, pause mechanisms, blacklist functions, tax systems
-    - Generate explanation: "This contract can pause token transfers" or "This token has 10% sell tax"
+    The function must perform these steps:
 
-    STEP 4 - TOKEN CONTRACT ANALYSIS (if token_address exists):
-    - Read token contract details: supply, decimals, freeze authority
-    - Check for scam indicators: fake token names, honeypot mechanics
-    - Analyze transfer restrictions and tax mechanisms
-    - Generate explanation: "This token charges 5% tax on sells" or "Token transfers can be frozen"
+    ✅ DATA EXTRACTION FIRST:
+    Extract addresses from target_data using:
+    - from_address = target_data.get('from_address')  
+    - to_address = target_data.get('to_address')
+    - program_id = target_data.get('program_id') 
+    - token_address = target_data.get('token_address')
 
-    STEP 5 - USER-FRIENDLY TRANSACTION EXPLANATION:
-    - Create simple English summary based on address analysis
-    - Examples:
-    * "You're sending SOL to Jupiter DEX to swap for USDC"
-    * "You're connecting to a token contract with suspicious tax mechanics" 
-    * "You're interacting with an unknown smart contract"
-    * "This is a known scammer address - BLOCKED"
+    Create addresses list: addresses_to_analyze = [addr for addr in [from_address, to_address, program_id, token_address] if addr and addr != 'None']
 
-    STEP 6 - EXISTING MODULE ANALYSIS:
-    - Use available security modules: {', '.join(available_modules)}
-    - MEVDetector: mev_detector.analyze_mev_risk(target_data)
-    - EnhancedContractAnalyzer: contract_analyzer.analyze_contract_for_drain_risk(target_data)
-    - BehaviorAnalyzer: behavior_analyzer.analyze_wallet_behavior(target_data)
-    - NFTScamDetector: nft_scam_detector.analyze_nft_scam_risk(target_data)
-    - AdaptiveDustDetector: dust_detector.analyze_transaction(target_data)
+    1. BLACKLIST CHECK: Check if any address in addresses_to_analyze exists in sensor.background_monitor.blacklisted_wallets (if available)
+    - If found, immediately return with risk_score=1.0 and threats_found=['blacklisted_address']
+
+    2. ADDRESS ANALYSIS: For each address, determine if it's:
+    - Unknown/invalid address
+    - Wallet address  
+    - Smart contract/program
+    - Token mint
+    - System program
+
+    3. SMART CONTRACT ANALYSIS: If program addresses found, analyze for:
+    - Honeypot mechanics
+    - Drain functions
+    - Tax systems
+    - Admin controls
+
+    4. TOKEN ANALYSIS: If token addresses found, check for:
+    - Freeze authority
+    - High transfer taxes
+    - Scam indicators
+
+    5. MODULE ANALYSIS: Use available sensor modules:
+    - if hasattr(sensor, 'dust_detector'): await sensor.dust_detector.analyze_transaction(target_data)
+    - if hasattr(sensor, 'mev_detector'): await sensor.mev_detector.analyze_mev_risk(target_data)
+    - if hasattr(sensor, 'contract_analyzer'): await sensor.contract_analyzer.analyze_contract_for_drain_risk(target_data)
+    - if hasattr(sensor, 'behavior_analyzer'): await sensor.behavior_analyzer.analyze_wallet_behavior(target_data)
+    - if hasattr(sensor, 'nft_scam_detector'): await sensor.nft_scam_detector.analyze_nft_scam_risk(target_data)
+
+    6. GENERATE USER EXPLANATION: Create simple English explanation of findings
 
     RETURN STRUCTURE:
     {{
         'risk_score': float (0.0-1.0),
         'threats_found': list of threat types,
-        'evidence': list of evidence descriptions,
+        'evidence': list of evidence descriptions,  
         'address_analysis': dict with address types and explanations,
         'contract_analysis': dict with smart contract details,
-        'user_explanation': string with simple English explanation,
-        'module_results': dict with results from existing modules,
-        'modules_used': list of modules that were called
+        'user_explanation': string explanation,
+        'module_results': dict with results from sensor modules,
+        'modules_used': list of modules called
     }}
 
-    Code Requirements:
-    - Use 'await module.method(target_data)' for module calls
-    - Handle module unavailability gracefully (check if hasattr(sensor, 'module_name'))
-    - Always check blacklist FIRST before other analysis
-    - Generate clear explanations for users
-    - Include evidence for all findings
-    - Return risk scores from 0.0 to 1.0
+    IMPORTANT:
+    - Use ONLY the real sensor object - NO Mock classes
+    - Handle missing modules gracefully with hasattr() checks
+    - Always check blacklist FIRST
+    - Return working code with proper error handling
+    - Use target_data.get() for safe key access
+    - Extract addresses from from_address, to_address, program_id, token_address fields
 
-    ONLY return the Python function code, no explanations or markdown.
+    Generate ONLY the function code, no imports or examples.
     """
         
         print(f"🚨 DEBUG: Generated prompt length: {len(code_generation_prompt)} chars")
@@ -770,7 +780,15 @@ class SecurityAgent:
         if hasattr(self.sensor, 'community_db') and self.sensor.community_db:
             modules.append('AdaptiveCommunityDatabase')
         
-        return modules if modules else ['BasicAnalysis']
+        if not modules:
+            error_list = []
+            for module_name in ['MEVDetector', 'EnhancedContractAnalyzer', 'BehaviorAnalyzer', 'NFTScamDetector', 'AdaptiveDustDetector']:
+                if hasattr(self.sensor, module_name.lower().replace('detector', '_detector').replace('analyzer', '_analyzer')) and getattr(self.sensor, module_name.lower().replace('detector', '_detector').replace('analyzer', '_analyzer')) is None:
+                    error_list.append(f"{module_name}: Failed to load")
+            
+            raise Exception(f"No analysis modules available: {'; '.join(error_list)}")
+
+        return modules
 
     async def _generate_ai_completion(self, instruction_message):
         """Generate AI completion with proper error handling"""
@@ -1129,25 +1147,196 @@ class SecurityAgent:
         return fallback_code.strip()
 
     async def _execute_ai_analysis_code_with_timeout(self, ai_code: str, target_data: Dict) -> Dict:
-        """Execute AI-generated analysis code with timeout"""
+        """
+        COMPLETE FIX: Execute AI-generated analysis code with proper asyncio and scoping
+        """
+        print(f"🚨 DEBUG: STEP 2 - Executing AI code with real sensor access")
+        
         try:
-            # For now, return a simple result since execution is complex
-            return {
-                'risk_score': 0.3,
-                'threats_found': ['basic_analysis'],
-                'evidence': ['Fallback analysis completed'],
-                'module_results': {},
-                'modules_used': ['fallback']
+            # Create a safe execution environment with real objects
+            execution_globals = {
+                '__builtins__': __builtins__,
+                'sensor': self.sensor,  # Real SecuritySensor instance
+                'target_data': target_data,
+                'asyncio': asyncio,
+                'json': json,
+                'datetime': datetime,
+                'os': os,
+                'print': print,
+                'hasattr': hasattr,
+                'getattr': getattr,
+                'len': len,
+                'str': str,
+                'dict': dict,
+                'list': list,
+                'max': max,
+                'min': min,
+                'float': float,
+                'int': int,
+                'type': type,
+                'set': set,
+                'isinstance': isinstance,
+                'sorted': sorted,
             }
+            
+            execution_locals = {}
+            
+            print(f"🚨 DEBUG: Preparing AI code for execution...")
+            print(f"🚨 DEBUG: AI code starts with: {ai_code[:100]}...")
+            
+            # Clean and properly format the AI code
+            cleaned_code = self._clean_ai_code_indentation(ai_code)
+            
+            # ✅ COMPLETE FIX: Two-step execution for proper scoping
+            if 'async def analyze_security_threats' in cleaned_code:
+                print(f"🚨 DEBUG: Detected async function, using two-step execution")
+                
+                # STEP 1: Execute the AI function definition
+                print(f"🚨 DEBUG: Step 1 - Defining AI function...")
+                exec(cleaned_code, execution_globals, execution_locals)
+                
+                # STEP 2: Execute the function and get result
+                print(f"🚨 DEBUG: Step 2 - Calling AI function...")
+                if 'analyze_security_threats' in execution_locals:
+                    ai_function = execution_locals['analyze_security_threats']
+                    result = await ai_function(target_data, self.sensor)
+                    print(f"🚨 DEBUG: AI function executed successfully: {type(result)}")
+                else:
+                    print(f"🚨 DEBUG: AI function not found in locals")
+                    result = self._create_fallback_result("AI function not found after execution")
+            
+            elif 'def analyze_security_threats' in cleaned_code:
+                # AI generated a sync function
+                print(f"🚨 DEBUG: Detected sync function, executing directly")
+                exec(cleaned_code, execution_globals, execution_locals)
+                
+                if 'analyze_security_threats' in execution_locals:
+                    ai_function = execution_locals['analyze_security_threats']
+                    result = ai_function(target_data, self.sensor)
+                    print(f"🚨 DEBUG: Sync AI function executed: {type(result)}")
+                else:
+                    result = self._create_fallback_result("Sync AI function not found")
+            
+            else:
+                # AI generated direct code, wrap it in a function
+                print(f"🚨 DEBUG: No function detected, wrapping code in function")
+                wrapped_code = f"""
+    def analyze_security_threats(target_data, sensor):
+    {self._indent_code(cleaned_code, 4)}
+        # Ensure something is returned
+        return {{'risk_score': 0.3, 'threats_found': [], 'evidence': ['Direct code execution'], 'module_results': {{}}, 'modules_used': ['wrapped_code']}}
+
+    # Execute the wrapped function
+    result = analyze_security_threats(target_data, sensor)
+    """
+                exec(wrapped_code, execution_globals, execution_locals)
+                result = execution_locals.get('result', self._create_fallback_result("Wrapped code failed"))
+            
+            # Validate and clean the result
+            if not isinstance(result, dict):
+                print(f"🚨 DEBUG: Invalid result type {type(result)}, converting...")
+                result = {
+                    'risk_score': 0.5,
+                    'threats_found': ['invalid_result_format'],
+                    'evidence': [f'AI returned {type(result)} instead of dict'],
+                    'module_results': {},
+                    'modules_used': ['format_error_fallback'],
+                    'raw_ai_result': str(result)
+                }
+            
+            # Ensure required fields and valid ranges
+            result.setdefault('risk_score', 0.5)
+            result.setdefault('threats_found', [])
+            result.setdefault('evidence', [])
+            result.setdefault('module_results', {})
+            result.setdefault('modules_used', ['ai_generated'])
+            
+            # Clamp risk score to valid range
+            try:
+                result['risk_score'] = max(0.0, min(1.0, float(result['risk_score'])))
+            except (ValueError, TypeError):
+                result['risk_score'] = 0.5
+            
+            print(f"🚨 DEBUG: Final AI result - Risk: {result['risk_score']:.2f}, Threats: {len(result.get('threats_found', []))}")
+            return result
+            
         except Exception as e:
-            logger.error(f"Code execution failed: {e}")
+            print(f"🚨 DEBUG: Critical AI execution error: {e}")
+            print(f"🚨 DEBUG: Critical traceback:")
+            print(traceback.format_exc())
+            
             return {
-                'risk_score': 0.5,
-                'threats_found': ['execution_error'],
-                'evidence': [f'Execution failed: {str(e)}'],
+                'risk_score': 0.7,
+                'threats_found': ['critical_ai_error'],
+                'evidence': [f'Critical AI execution error: {str(e)}'],
                 'module_results': {},
-                'modules_used': ['error_fallback']
+                'modules_used': ['critical_error_fallback'],
+                'critical_error': str(e)
             }
+
+    def _create_fallback_result(self, reason: str) -> Dict:
+        """Create a fallback result when AI execution fails"""
+        return {
+            'risk_score': 0.4,
+            'threats_found': ['ai_execution_incomplete'],
+            'evidence': [f'AI execution incomplete: {reason}'],
+            'module_results': {},
+            'modules_used': ['execution_fallback']
+        }
+
+    def _clean_ai_code_indentation(self, code: str) -> str:
+        """
+        Clean and normalize indentation in AI-generated code
+        """
+        if not code:
+            return code
+        
+        lines = code.split('\n')
+        cleaned_lines = []
+        
+        # Remove empty lines at the beginning
+        while lines and lines[0].strip() == '':
+            lines.pop(0)
+        
+        # Find the minimum indentation (excluding empty lines)
+        min_indent = float('inf')
+        for line in lines:
+            if line.strip():  # Skip empty lines
+                indent = len(line) - len(line.lstrip())
+                min_indent = min(min_indent, indent)
+        
+        # If all lines are at root level, no adjustment needed
+        if min_indent == 0 or min_indent == float('inf'):
+            return '\n'.join(lines)
+        
+        # Remove the common indentation
+        for line in lines:
+            if line.strip():
+                cleaned_lines.append(line[min_indent:])
+            else:
+                cleaned_lines.append('')
+        
+        return '\n'.join(cleaned_lines)
+
+    def _indent_code(self, code: str, spaces: int) -> str:
+        """
+        Add indentation to code block
+        """
+        if not code:
+            return code
+        
+        indent = ' ' * spaces
+        lines = code.split('\n')
+        indented_lines = []
+        
+        for line in lines:
+            if line.strip():  # Only indent non-empty lines
+                indented_lines.append(indent + line)
+            else:
+                indented_lines.append('')
+        
+        return '\n'.join(indented_lines)
+    
 
     async def _assess_risk_from_cached_results(self, execution_results: Dict, cached_intelligence: Dict) -> Dict:
         """
