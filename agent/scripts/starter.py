@@ -359,6 +359,11 @@ async def initialize_enhanced_security_system(fe_data: dict):
             logger.warning(f"⚠️ Background Monitor failed: {e}")
             background_monitor = None
     
+    # 🕸️ Connect Background Monitor to SecuritySensor for NetworkAnalyzer
+    if background_monitor and hasattr(background_monitor, 'set_security_sensor'):
+        background_monitor.set_security_sensor(sensor)
+        logger.info("🔗 Background Monitor ↔ NetworkAnalyzer connected")
+
     # Start Real-Time Incoming Transaction Monitoring
     if hasattr(sensor, 'start_incoming_monitor'):
         try:

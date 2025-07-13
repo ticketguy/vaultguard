@@ -10,7 +10,9 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 import json
 import statistics
-from .solana_rpc_client import SolanaRPCClient  # Import our new RPC client
+from .solana_rpc_client import IntelligentSolanaRPCClient as SolanaRPCClient
+from src.rpc_config import FlexibleRPCConfig
+
 
 
 class BehaviorAnalyzer:
@@ -19,9 +21,11 @@ class BehaviorAnalyzer:
     Builds user profiles and identifies deviations from normal patterns.
     """
     
-    def __init__(self, rpc_url: str = "https://api.mainnet-beta.solana.com", meta_swap_api_url: str = "http://localhost:9009"):
-        # Initialize Solana RPC client for real data
-        self.solana_client = SolanaRPCClient(rpc_url=rpc_url, meta_swap_api_url=meta_swap_api_url)
+class BehaviorAnalyzer:
+    def __init__(self):
+
+        self.solana_client = SolanaRPCClient() 
+   
         
         # User behavioral profiles storage
         self.user_profiles = {}

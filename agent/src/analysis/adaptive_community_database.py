@@ -1000,24 +1000,24 @@ class AdaptiveCommunityDatabase:
             'learning_source': legitimacy_result['learning_source']
         }
 
-class AdaptiveDustDetector:
-    """
-    Adaptive dust detector that learns from community
-    """
-    
-    def __init__(self, rag_client=None):
-        self.community_db = AdaptiveCommunityDatabase(rag_client)
+    class AdaptiveDustDetector:
+        """
+        Adaptive dust detector that learns from community
+        """
         
-        self.basic_thresholds = {
-            'tiny_dust': 0.00001,
-            'small_dust': 0.0001,
-            'medium_dust': 0.001,
-            'tracking_threshold': 0.01
-        }
+        def __init__(self, rag_client=None):
+            self.community_db = AdaptiveCommunityDatabase(rag_client)
+            
+            self.basic_thresholds = {
+                'tiny_dust': 0.00001,
+                'small_dust': 0.0001,
+                'medium_dust': 0.001,
+                'tracking_threshold': 0.01
+            }
 
     async def analyze_transaction(self, transaction_data: Dict) -> Dict:
         """
-        Analyze transaction using community intelligence
+        Analyze transaction using community intelligence - COMPLETE IMPLEMENTATION
         """
         analysis_result = {
             'is_dust_attack': False,
@@ -1029,43 +1029,49 @@ class AdaptiveDustDetector:
             'analysis_source': 'adaptive_community_learning'
         }
         
-        spam_analysis = await self.community_db.analyze_spam_patterns(transaction_data)
-        
-        analysis_result['is_dust_attack'] = spam_analysis['is_spam']
-        analysis_result['dust_risk_score'] = spam_analysis['spam_confidence']
-        analysis_result['learning_confidence'] = spam_analysis['spam_confidence']
-        
-        address = transaction_data.get('from_address', '')
-        token_symbol = transaction_data.get('token_symbol', '')
-        token_name = transaction_data.get('token_name', '')
-        
-        legitimacy_result = await self.community_db.check_legitimacy(address, token_symbol, token_name)
-        
-        analysis_result['is_legitimate_airdrop'] = legitimacy_result['is_legitimate']
-        analysis_result['legitimacy_score'] = legitimacy_result['legitimacy_score']
-        
-        if legitimacy_result['is_legitimate']:
-            analysis_result['community_sentiment'] = 'positive'
-        elif spam_analysis['is_spam']:
-            analysis_result['community_sentiment'] = 'negative'
-        else:
-            analysis_result['community_sentiment'] = 'neutral'
-        
-        return analysis_result
-
-    async def learn_from_user_decision(self, transaction_data: Dict, user_decision: str, user_reasoning: str = ""):
-        """
-        Learn from user feedback about dust/airdrop decisions
-        """
-        feedback_data = {
-            'address': transaction_data.get('from_address', ''),
-            'token_symbol': transaction_data.get('token_symbol', ''),
-            'token_name': transaction_data.get('token_name', ''),
-            'decision': user_decision,
-            'user_reasoning': user_reasoning,
-            'token_data': transaction_data,
-            'timestamp': datetime.now().isoformat(),
-            'confidence': 0.8
-        }
-        
-        await self.community_db.learn_from_user_feedback(feedback_data)
+        try:
+            # STEP 1: Extract data safely with proper None handling
+            value = float(transaction_data.get('value', 0))
+            from_address = transaction_data.get('from_address', '') or ''
+            token_symbol = transaction_data.get('token_symbol', '') or ''
+            token_name = transaction_data.get('token_name', '') or ''
+            
+            # STEP 2: Spam pattern analysis using community DB
+            spam_analysis = await self.community_db.analyze_spam_patterns(transaction_data)
+            
+            analysis_result['is_dust_attack'] = spam_analysis.get('is_spam', False)
+            analysis_result['dust_risk_score'] = spam_analysis.get('spam_confidence', 0.0)
+            analysis_result['learning_confidence'] = spam_analysis.get('spam_confidence', 0.0)
+            
+            # STEP 3: Legitimacy check using community intelligence
+            legitimacy_result = await self.community_db.check_legitimacy(
+                from_address, 
+                token_symbol, 
+                token_name
+            )
+            
+            analysis_result['is_legitimate_airdrop'] = legitimacy_result.get('is_legitimate', False)
+            analysis_result['legitimacy_score'] = legitimacy_result.get('legitimacy_score', 0.0)
+            
+            # STEP 4: Determine community sentiment
+            if legitimacy_result.get('is_legitimate', False):
+                analysis_result['community_sentiment'] = 'positive'
+            elif spam_analysis.get('is_spam', False):
+                analysis_result['community_sentiment'] = 'negative'
+            else:
+                analysis_result['community_sentiment'] = 'neutral'
+            
+            # STEP 5: Basic dust detection (value-based)
+            if 0 < value < self.basic_thresholds['tiny_dust']:
+                analysis_result['is_dust_attack'] = True
+                analysis_result['dust_risk_score'] = max(analysis_result['dust_risk_score'], 0.8)
+            elif 0 < value < self.basic_thresholds['small_dust']:
+                analysis_result['dust_risk_score'] = max(analysis_result['dust_risk_score'], 0.4)
+            
+            return analysis_result
+            
+        except Exception as e:
+            print(f"❌ Error in AdaptiveDustDetector.analyze_transaction: {e}")
+            # Return safe defaults on error
+            analysis_result['analysis_source'] = f'error: {str(e)}'
+            return analysis_result

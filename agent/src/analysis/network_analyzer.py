@@ -2,6 +2,7 @@
 Network Analysis for Solana
 Maps relationships between addresses and identifies clusters
 """
+import hashlib
 
 import asyncio
 from typing import Dict, List, Optional, Set, Tuple
@@ -14,6 +15,12 @@ class NetworkAnalyzer:
     """
     
     def __init__(self):
+
+        from src.analysis.solana_rpc_client import IntelligentSolanaRPCClient as SolanaRPCClient
+        
+        self.solana_client = SolanaRPCClient()
+
+        
         self.network_patterns = {
             'cluster_indicators': {
                 'common_patterns': [

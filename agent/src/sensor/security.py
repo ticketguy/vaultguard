@@ -11,16 +11,21 @@ import json
 import requests
 from datetime import datetime, timedelta
 import traceback
+import logging
+
+# Set up logger for this module
+logger = logging.getLogger(__name__)
 
 # FIXED IMPORTS - Capture specific errors instead of silent failures
 module_import_errors = {}
 
 try:
-    from src.analysis.adaptive_community_database import AdaptiveCommunityDatabase, AdaptiveDustDetector
+    from src.analysis.adaptive_community_database import AdaptiveCommunityDatabase
+
 except ImportError as e:
     module_import_errors['AdaptiveCommunityDatabase'] = str(e)
     AdaptiveCommunityDatabase = None
-    AdaptiveDustDetector = None
+
 
 try:
     from src.analysis.mev_detector import MEVDetector  
@@ -126,15 +131,6 @@ class SecuritySensor:
         except Exception as e:
             self.module_errors['AdaptiveCommunityDatabase'] = f"Initialization failed: {str(e)}"
             self.community_db = None
-
-        try:
-            self.dust_detector = AdaptiveDustDetector(rag_client) if AdaptiveDustDetector else None
-            if not self.dust_detector and 'AdaptiveCommunityDatabase' in module_import_errors:
-                self.module_errors['AdaptiveDustDetector'] = module_import_errors['AdaptiveCommunityDatabase']
-        except Exception as e:
-            self.module_errors['AdaptiveDustDetector'] = f"Initialization failed: {str(e)}"
-            self.dust_detector = None
-
         try:
             self.mev_detector = MEVDetector() if MEVDetector else None
             if not self.mev_detector and 'MEVDetector' in module_import_errors:
@@ -197,8 +193,9 @@ class SecuritySensor:
         if SolanaRPCClient:
             try:
                 self.solana_client = SolanaRPCClient(
-                    helius_api_key=self.rpc_api_key,
-                    primary_rpc_url=self.solana_rpc_url
+                    rpc_api_key=self.rpc_api_key,
+                    primary_rpc_url=self.solana_rpc_url,
+                    rpc_provider_name=self.rpc_provider_name
                 )
                 print(f"✅ Intelligent RPC client initialized with {self.rpc_provider_name}")
             except Exception as e:
@@ -232,7 +229,6 @@ class SecuritySensor:
         # Check each module status
         modules_to_check = [
             ('AdaptiveCommunityDatabase', self.community_db),
-            ('AdaptiveDustDetector', self.dust_detector),
             ('MEVDetector', self.mev_detector),
             ('EnhancedContractAnalyzer', self.contract_analyzer),
             ('SmartContractExplainer', self.contract_explainer),
@@ -279,7 +275,6 @@ class SecuritySensor:
         """Get list of successfully loaded analysis modules with error reporting"""
         modules = []
         if self.community_db: modules.append("AdaptiveCommunityDatabase")
-        if self.dust_detector: modules.append("AdaptiveDustDetector")
         if self.mev_detector: modules.append("MEVDetector")
         if self.contract_analyzer: modules.append("EnhancedContractAnalyzer")
         if self.contract_explainer: modules.append("SmartContractExplainer")
@@ -768,21 +763,32 @@ class SecuritySensor:
     # ========== REAL-TIME TRANSACTION INTERCEPTION ==========
 
     async def intercept_outgoing_transaction(self, transaction_data: Dict, user_language: str = "english") -> Dict:
-        """
-        Real-time outgoing transaction analysis (BEFORE signing)
-        """
+        """Real-time outgoing transaction analysis (BEFORE signing)"""
         if not self.security_agent:
             raise Exception("No AI agent connected - cannot analyze transactions")
         
         try:
             transaction_data = self._sanitize_transaction_data(transaction_data)
             
+            # Feed to NetworkAnalyzer for graph building
+            await self._feed_transaction_to_network_analyzer(transaction_data)
+            
+            # Add network intelligence context for AI
+            from_address = transaction_data.get('from_address', '')
+            to_address = transaction_data.get('to_address', '')
+            
+            if from_address:
+                transaction_data['network_intel_from'] = await self.get_network_intelligence_summary(from_address)
+            if to_address:
+                transaction_data['network_intel_to'] = await self.get_network_intelligence_summary(to_address)
+            
+            # AI analysis with network context
             analysis_result = await self.security_agent.analyze_with_ai_code_generation(
                 transaction_data, user_language
             )
             
             analysis_result['sensor_modules_used'] = self._get_loaded_modules()
-            analysis_result['analysis_method'] = 'ai_code_generation'
+            analysis_result['analysis_method'] = 'ai_code_generation_with_network'
             analysis_result['rpc_provider'] = self.rpc_provider_name
             
             return analysis_result
@@ -804,6 +810,10 @@ class SecuritySensor:
             
             print(f"📥 Processing incoming transaction: {transaction_data.get('hash', 'unknown')}")
             
+            # Feed to NetworkAnalyzer for relationship graph
+            await self._feed_transaction_to_network_analyzer(transaction_data)
+
+
             transaction_data['direction'] = 'incoming'
             transaction_data['analysis_type'] = 'quarantine_assessment'
             
@@ -873,6 +883,21 @@ class SecuritySensor:
             error_msg = f"DApp reputation analysis failed: {str(e)}"
             print(f"❌ {error_msg}")
             raise Exception(error_msg)
+        
+    async def _feed_transaction_to_network_analyzer(self, transaction_data: Dict):
+        """Feed transaction data to NetworkAnalyzer to build relationship graph"""
+        if self.network_analyzer:
+            try:
+                # Extract key addresses for network analysis
+                from_address = transaction_data.get('from_address', '')
+                to_address = transaction_data.get('to_address', '')
+                
+                # Feed to NetworkAnalyzer if we have valid addresses
+                if from_address and to_address:
+                    await self.network_analyzer.analyze_address_network(from_address, transaction_data)
+                    logger.debug(f"🕸️ Updated network graph: {from_address[:8]}...→{to_address[:8]}...")
+            except Exception as e:
+                logger.warning(f"⚠️ NetworkAnalyzer feeding failed: {e}")
 
     # ========== REAL-TIME MONITORING ==========
 
@@ -1033,11 +1058,6 @@ class SecuritySensor:
                     raise Exception(f"EnhancedContractAnalyzer not available: {self.module_errors.get('EnhancedContractAnalyzer', 'Module not loaded')}")
                 return await self.contract_analyzer.analyze_contract_for_drain_risk(target_data)
             
-            elif analysis_type == "dust":
-                if not self.dust_detector:
-                    raise Exception(f"AdaptiveDustDetector not available: {self.module_errors.get('AdaptiveDustDetector', 'Module not loaded')}")
-                return await self.dust_detector.analyze_transaction(target_data)
-            
             elif analysis_type == "nft":
                 if not self.nft_scam_detector:
                     raise Exception(f"NFTScamDetector not available: {self.module_errors.get('NFTScamDetector', 'Module not loaded')}")
@@ -1089,3 +1109,148 @@ class SecuritySensor:
         quarantine_count = len(self.get_quarantined_items())
         self.threat_cache.clear()
         print(f"🧹 Cleared {quarantine_count} quarantined items from cache")
+
+
+
+    async def analyze_network_relationships(self, wallet_address: str, transaction_data: Dict = None) -> Dict:
+        """
+        Analyze network relationships for security assessment
+        Primary method called by AI-generated code
+        """
+        if not self.network_analyzer:
+            return {
+                'network_risk_score': 0.0,
+                'has_network_risks': False,
+                'relationship_warnings': ['NetworkAnalyzer not available'],
+                'analysis': 'Network analysis not available'
+            }
+        
+        try:
+            # Use provided transaction data or create basic structure
+            if not transaction_data:
+                transaction_data = {
+                    'from_address': wallet_address,
+                    'to_address': 'unknown',
+                    'timestamp': datetime.now(),
+                    'value': 0
+                }
+            
+            # Get comprehensive network analysis
+            network_result = await self.network_analyzer.analyze_address_network(
+                wallet_address, transaction_data
+            )
+            
+            # Extract key risk factors for AI integration
+            risk_score = network_result.get('network_risk_score', 0.0)
+            suspicious_patterns = network_result.get('suspicious_patterns', [])
+            relationship_analysis = network_result.get('relationship_analysis', {})
+            risk_propagation = network_result.get('risk_propagation', {})
+            
+            # Generate user-friendly warnings
+            warnings = []
+            
+            # Check for high-risk relationships
+            suspicious_relationships = relationship_analysis.get('suspicious_relationships', [])
+            for rel in suspicious_relationships:
+                if rel.get('risk_score', 0) > 0.7:
+                    warnings.append(f"Connected to high-risk address {rel['address'][:8]}... (risk: {rel['risk_score']:.1%})")
+            
+            # Check for risk contamination
+            contamination = risk_propagation.get('contamination_level', 'none')
+            if contamination in ['high', 'medium']:
+                inherited_risk = risk_propagation.get('inherited_risk', 0)
+                warnings.append(f"Risk contamination detected: {contamination} level ({inherited_risk:.1%} inherited risk)")
+            
+            # Check for suspicious patterns
+            for pattern in suspicious_patterns:
+                pattern_type = pattern.get('pattern_type', 'unknown')
+                pattern_risk = pattern.get('risk_score', 0)
+                if pattern_risk > 0.5:
+                    warnings.append(f"Suspicious network pattern: {pattern_type} (risk: {pattern_risk:.1%})")
+            
+            # Create comprehensive result for AI analysis
+            analysis_result = {
+                'network_risk_score': risk_score,
+                'has_network_risks': risk_score > 0.3,
+                'relationship_warnings': warnings,
+                'analysis': self._create_network_analysis_summary(network_result),
+                'detailed_results': {
+                    'cluster_size': network_result.get('cluster_analysis', {}).get('cluster_size', 0),
+                    'direct_connections': len(relationship_analysis.get('incoming_relationships', [])) + 
+                                    len(relationship_analysis.get('outgoing_relationships', [])),
+                    'suspicious_pattern_count': len(suspicious_patterns),
+                    'contamination_level': contamination,
+                    'network_recommendations': network_result.get('network_recommendations', [])
+                }
+            }
+            
+            print(f"🕸️ Network analysis for {wallet_address[:8]}...: Risk {risk_score:.1%}, {len(warnings)} warnings")
+            return analysis_result
+            
+        except Exception as e:
+            print(f"⚠️ Network relationship analysis failed: {e}")
+            return {
+                'network_risk_score': 0.0,
+                'has_network_risks': False,
+                'relationship_warnings': [f'Network analysis error: {str(e)}'],
+                'analysis': 'Network analysis failed - proceeding without network risk assessment'
+            }
+
+    def _create_network_analysis_summary(self, network_result: Dict) -> str:
+        """Create human-readable network analysis summary for AI integration"""
+        risk_score = network_result.get('network_risk_score', 0.0)
+        cluster_size = network_result.get('cluster_analysis', {}).get('cluster_size', 0)
+        suspicious_patterns = network_result.get('suspicious_patterns', [])
+        
+        if risk_score > 0.8:
+            risk_level = "VERY HIGH"
+        elif risk_score > 0.6:
+            risk_level = "HIGH"
+        elif risk_score > 0.4:
+            risk_level = "MEDIUM"
+        elif risk_score > 0.2:
+            risk_level = "LOW"
+        else:
+            risk_level = "MINIMAL"
+        
+        summary_parts = [
+            f"Network risk level: {risk_level} ({risk_score:.1%})"
+        ]
+        
+        if cluster_size > 1:
+            summary_parts.append(f"Part of cluster with {cluster_size} connected addresses")
+        
+        if suspicious_patterns:
+            summary_parts.append(f"Found {len(suspicious_patterns)} suspicious network patterns")
+        
+        contamination = network_result.get('risk_propagation', {}).get('contamination_level', 'none')
+        if contamination != 'none':
+            summary_parts.append(f"Risk contamination: {contamination} level")
+        
+        return ". ".join(summary_parts)
+
+    async def get_network_intelligence_summary(self, wallet_address: str) -> str:
+        """
+        Get quick network intelligence summary for AI prompts
+        Lighter weight method for background context
+        """
+        if not self.network_analyzer:
+            return "Network analysis not available"
+        
+        try:
+            # Quick network check without full analysis
+            if hasattr(self.network_analyzer, 'address_network') and wallet_address in self.network_analyzer.address_network:
+                connections = len(list(self.network_analyzer.address_network.neighbors(wallet_address)))
+                risk_score = self.network_analyzer.risk_scores.get(wallet_address, 0.0)
+                
+                if risk_score > 0.5:
+                    return f"Known address with {connections} connections and {risk_score:.1%} network risk"
+                elif connections > 10:
+                    return f"Active address with {connections} network connections"
+                else:
+                    return f"Standard address with {connections} connections"
+            else:
+                return "New address - no network history available"
+                
+        except Exception as e:
+            return "Network intelligence unavailable"

@@ -63,6 +63,8 @@ class EnhancedBackgroundIntelligenceMonitor:
         self.db = db
         self.rag = rag
         self.edge_learning_engine = edge_learning_engine
+        self.security_sensor = None  # Will be injected
+        self.network_analyzer = None  # Will be set when sensor connects
         
         self.config = {
             'monitor_interval': int(os.getenv('MONITOR_INTERVAL', 600)),  # 10 minutes
@@ -126,6 +128,33 @@ class EnhancedBackgroundIntelligenceMonitor:
             logger.info("✅ EdgeLearningEngine integration complete")
         except Exception as e:
             logger.error(f"❌ EdgeLearningEngine integration failed: {e}")
+
+    def set_security_sensor(self, security_sensor):
+        """Connect background monitor to SecuritySensor for network analysis"""
+        self.security_sensor = security_sensor
+        self.network_analyzer = security_sensor.network_analyzer if security_sensor else None
+        if self.network_analyzer:
+            logger.info("🕸️ Background monitor connected to NetworkAnalyzer")
+
+    async def _feed_threat_to_network_analyzer(self, threat_address: str, threat_data: Dict):
+        """Feed discovered threats to NetworkAnalyzer for risk propagation"""
+        if self.network_analyzer:
+            try:
+                # Create fake transaction data to feed the network
+                fake_transaction = {
+                    'from_address': threat_address,
+                    'to_address': 'THREAT_SOURCE',  # Marker for threat origin
+                    'timestamp': datetime.now(),
+                    'value': 0,
+                    'threat_type': threat_data.get('threat_type', 'unknown'),
+                    'source': threat_data.get('source', 'background_monitor')
+                }
+                
+                await self.network_analyzer.analyze_address_network(threat_address, fake_transaction)
+                logger.info(f"🕸️ Fed threat {threat_address[:8]}... to network analysis")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to feed threat to NetworkAnalyzer: {e}")
 
     async def _preload_blacklist_cache(self):
         """Preload existing blacklisted wallets into EdgeLearningEngine cache - ENHANCED"""
@@ -611,6 +640,14 @@ class EnhancedBackgroundIntelligenceMonitor:
                 
                 for address in addresses:
                     await self._add_blacklisted_wallet_enhanced(address, threat_type, source)
+
+                                # feed directly to NetworkAnalyzer
+                await self._feed_threat_to_network_analyzer(address, {
+                    'threat_type': threat_type,
+                    'source': f'social_media_{source}',
+                    'confidence': 0.7,
+                    'content': threat_content
+                })
                 
                 logger.info(f"🚨 New threat discovered from {source}: {threat_type}")
                 self.stats['threats_discovered'] += 1
@@ -660,6 +697,14 @@ class EnhancedBackgroundIntelligenceMonitor:
                     except asyncio.QueueFull:
                         logger.warning("⚠️ Cache update queue full - dropping wallet update")
                 
+                            # 🕸️ NEW: Feed to NetworkAnalyzer
+                await self._feed_threat_to_network_analyzer(address, {
+                    'threat_type': threat_type,
+                    'source': source,
+                    'confidence': 0.8
+                })
+
+
                 logger.warning(f"🚫 Added {address[:8]}... to blacklist ({threat_type})")
                 self.stats['wallets_tracked'] += 1
             
@@ -1209,7 +1254,7 @@ class EnhancedBackgroundIntelligenceMonitor:
             return {'success': False, 'error': str(e)}
 
 async def start_enhanced_background_monitor(db: SQLiteDB, rag: RAGClient, 
-                                          edge_learning_engine=None) -> EnhancedBackgroundIntelligenceMonitor:
+                                        edge_learning_engine=None) -> EnhancedBackgroundIntelligenceMonitor:
     """Start the enhanced background intelligence monitor with EdgeLearningEngine integration"""
     monitor = EnhancedBackgroundIntelligenceMonitor(db, rag, edge_learning_engine)
     await monitor.initialize()

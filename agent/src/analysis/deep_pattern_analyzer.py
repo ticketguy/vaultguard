@@ -91,15 +91,17 @@ class DeepPatternAnalyzer:
     
     async def deep_analyze_transaction_intent(self, transaction_data: Dict, 
                                             historical_context: Dict = None) -> Dict:
-        """Analyze transaction intent with deep pattern recognition"""
+        """Analyze transaction intent with deep pattern recognition - FIXED"""
         
         # Handle None historical_context
         if historical_context is None:
             historical_context = {}
         
+        # SAFE DATA EXTRACTION with proper None handling
         value = float(transaction_data.get('value', 0))
-        from_address = transaction_data.get('from_address', '').lower()
-        token_name = transaction_data.get('token_name', '').lower()
+        from_address = (transaction_data.get('from_address', '') or '').lower()
+        token_name = (transaction_data.get('token_name', '') or '').lower()
+        token_symbol = (transaction_data.get('token_symbol', '') or '').lower()
         
         analysis = {
             'intent_analysis': {},
@@ -129,12 +131,19 @@ class DeepPatternAnalyzer:
             intent = 'phishing_intent'
             analysis['protection_recommendations'].append("Review token legitimacy")
         
+        # Token symbol analysis
+        if any(pattern in token_symbol for pattern in self.suspicious_patterns):
+            confidence += 0.5
+            intent = 'phishing_intent'
+            analysis['protection_recommendations'].append("Verify token authenticity")
+        
+        # Ensure confidence is always a float
         confidence = min(float(confidence), 1.0)
         
         analysis['intent_analysis'] = {
             'primary_intent': intent,
             'confidence': confidence,
-            'intent_explanation': self._explain_intent(intent, confidence)  # Now regular function call
+            'intent_explanation': self._explain_intent(intent, confidence)
         }
         
         analysis['confidence_score'] = confidence
@@ -372,3 +381,86 @@ class DeepPatternAnalyzer:
         
         return recommendations
     
+    async def analyze_wallet_behavior(self, wallet_address: str) -> Dict:
+        """
+        Analyze wallet behavior patterns - NEW METHOD
+        """
+        try:
+            # Initialize behavior analysis result
+            behavior_analysis = {
+                'has_anomalies': False,
+                'anomaly_score': 0.0,
+                'anomalies_found': 0,
+                'analysis': "Wallet behavior analysis completed",
+                'behavioral_profile': {},
+                'anomaly_details': [],
+                'risk_factors': [],
+                'recommendations': []
+            }
+            
+            # SAFE ADDRESS HANDLING
+            if not wallet_address or wallet_address == 'unknown':
+                behavior_analysis['analysis'] = "No wallet address provided for analysis"
+                return behavior_analysis
+            
+            wallet_addr = wallet_address.lower()
+            
+            # Basic pattern analysis
+            risk_indicators = []
+            anomaly_score = 0.0
+            
+            # Check for suspicious address patterns
+            if any(pattern in wallet_addr for pattern in ['dead', '1111', '0000', 'beef']):
+                risk_indicators.append("Suspicious address pattern detected")
+                anomaly_score += 0.4
+            
+            # Check address length and format
+            if len(wallet_addr) != 44:  # Standard Solana address length
+                risk_indicators.append("Non-standard address length")
+                anomaly_score += 0.3
+            
+            # Behavioral profile based on address characteristics
+            behavior_analysis['behavioral_profile'] = {
+                'address_length': len(wallet_addr),
+                'has_suspicious_patterns': bool(risk_indicators),
+                'estimated_risk_level': 'high' if anomaly_score > 0.6 else 'medium' if anomaly_score > 0.3 else 'low'
+            }
+            
+            # Set anomaly details
+            if risk_indicators:
+                behavior_analysis['has_anomalies'] = True
+                behavior_analysis['anomalies_found'] = len(risk_indicators)
+                behavior_analysis['anomaly_details'] = risk_indicators
+                behavior_analysis['risk_factors'] = risk_indicators
+                behavior_analysis['recommendations'] = ["Review wallet activity", "Monitor for suspicious behavior"]
+            
+            behavior_analysis['anomaly_score'] = min(anomaly_score, 1.0)
+            
+            return behavior_analysis
+            
+        except Exception as e:
+            print(f"❌ Error in analyze_wallet_behavior: {e}")
+            return {
+                'has_anomalies': False,
+                'anomaly_score': 0.0,
+                'anomalies_found': 0,
+                'analysis': f"Analysis failed: {str(e)}",
+                'behavioral_profile': {},
+                'anomaly_details': [],
+                'risk_factors': [],
+                'recommendations': []
+            }
+
+    # ADD this helper method to DeepPatternAnalyzer class:
+    def _explain_intent(self, intent: str, confidence: float) -> str:
+        """Explain the detected intent"""
+        explanations = {
+            'legitimate_transfer_intent': "This appears to be a normal transaction",
+            'dust_attack_intent': "This looks like a dust attack to track your wallet",
+            'phishing_intent': "This may be a phishing attempt or fake airdrop"
+        }
+        
+        explanation = explanations.get(intent, "Unknown transaction intent")
+        confidence_text = "high" if confidence > 0.7 else "medium" if confidence > 0.4 else "low"
+        
+        return f"{explanation} (confidence: {confidence_text})"
